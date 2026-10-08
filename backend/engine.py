@@ -2,7 +2,7 @@ import os
 from typing import Tuple
 from llama_cpp import Llama
 
-from backend.config import N_CTX, N_THREADS, resolve_model_path
+from backend.config import N_CTX, N_CTX_HIGH, N_THREADS, resolve_model_path
 from backend.job import CHAT, Job
 
 
@@ -20,7 +20,7 @@ class LlamaEngine:
 		# Dual contexts: separate KV caches sharing read-only model weights via mmap
 		self.llm_high = Llama(
 			model_path=self.model_path,
-			n_ctx=512,
+			n_ctx=N_CTX_HIGH,
 			n_threads=N_THREADS,
 			verbose=False,
 		)

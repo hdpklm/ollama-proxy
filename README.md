@@ -97,8 +97,11 @@ PROXY_API_KEY=cambia_esta_clave
 # Ruta absoluta o relativa al modelo GGUF
 MODEL_PATH=./modelos/llama-3.2-1b-instruct-q4_k_m.gguf
 
-# Longitud maxima de contexto (en tokens)
+# Longitud maxima de contexto para peticiones normales (en tokens)
 N_CTX=2048
+
+# Longitud maxima de contexto para peticiones urgentes (alta prioridad)
+N_CTX_HIGH=2048
 
 # Numero de hilos de CPU dedicados a la inferencia (en RPi5 poner 4)
 N_THREADS=4

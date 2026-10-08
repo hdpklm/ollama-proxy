@@ -5,6 +5,7 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 PROXY_API_KEY = os.getenv("PROXY_API_KEY", "")
 MODEL_PATH = os.getenv("MODEL_PATH", "").strip()
 N_CTX = int(os.getenv("N_CTX", "4096"))
+N_CTX_HIGH = int(os.getenv("N_CTX_HIGH", "2048"))
 N_THREADS = int(os.getenv("N_THREADS", "4"))
 
 
