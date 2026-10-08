@@ -8,3 +8,8 @@ dependencies = [
 	"httpx",
 	"llama-cpp-python",
 ]
+
+[tool.uv.sources]
+llama-cpp-python = [
+	{ url = "https://github.com/hdpklm/ollama-proxy/releases/download/v0.3.36-rpi5/llama_cpp_python-0.3.36-py3-none-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+]

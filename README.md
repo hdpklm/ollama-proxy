@@ -30,16 +30,56 @@ git clone https://github.com/tu-usuario/ollama-proxy.git
 cd ollama-proxy
 ```
 
-### 2. Instalar dependencias con uv (Recomendado)
+### 2. Instalación General Rápida
 ```bash
 uv sync
 ```
 
-*(Alternativa con pip tradicional)*:
+---
+
+## Guía Paso a Paso: Compilación Nativa en Raspberry Pi 5 (Máxima Velocidad)
+
+Para exprimir al 100% las instrucciones vectoriales por hardware del procesador **Cortex-A76 (ARM NEON y DotProd)** y superar la velocidad de Ollama, sigue estos pasos en Raspberry Pi OS:
+
+### Paso 1: Instalar herramientas de compilación del sistema
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # En Windows: .venv\Scripts\activate
-pip install -r pyproject.toml
+sudo apt update
+sudo apt install -y build-essential cmake
+```
+
+### Paso 2: Instalar `uv` (si no lo tienes instalado)
+Raspberry Pi OS no incluye `uv` de serie. Instálalo y carga sus rutas:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+```
+
+### Paso 3: Crear y activar el entorno virtual
+> [!IMPORTANT]
+> `uv` requiere un entorno virtual activo antes de compilar o instalar paquetes para no romper el sistema. Si no lo activas, recibirás el error `error: No virtual environment found`.
+
+```bash
+cd ollama-proxy
+uv venv
+source .venv/bin/activate
+```
+*(Verás que tu terminal ahora empieza con `(ollama-proxy)` o `(venv)`).*
+
+### Paso 4: Compilar `llama-cpp-python` con aceleración por hardware
+```bash
+CMAKE_ARGS="-DGGML_NATIVE=on" uv pip install --no-binary llama-cpp-python --force-reinstall llama-cpp-python
+```
+
+> [!NOTE]
+> **Tiempo de espera y uso de MicroSD**:
+> - En una tarjeta MicroSD, la compilación tardará entre **8 y 15 minutos** con los 4 núcleos al 100% y el Swap activo (es normal ver el Swap al 50%-70% mientras GCC compila las tablas C++).
+> - Verás el mensaje `⠸ Preparing packages... | Building llama-cpp-python`. **No lo canceles ni toques la consola**: el sistema no está colgado, solo está terminando de ensamblar el motor.
+> - Este proceso solo se hace **una sola vez**. Luego, al ejecutar el proxy, todo corre en memoria RAM a máxima velocidad.
+
+### Paso 5: Instalar el resto de dependencias del proxy
+Una vez terminada la compilación de `llama-cpp-python`, instala el resto de librerías del proyecto:
+```bash
+uv pip install fastapi uvicorn pydantic python-dotenv httpx
 ```
 
 ---
@@ -122,6 +162,11 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 ### En Linux / Raspberry Pi 5
+```bash
+chmod +x run.sh
+./run.sh
+```
+O manualmente:
 ```bash
 uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ```
