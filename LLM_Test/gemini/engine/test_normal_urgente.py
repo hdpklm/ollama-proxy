@@ -8,11 +8,11 @@ import urllib.request
 import uvicorn
 from main import app
 
-URL = "http://127.0.0.1:8000"
+URL = "http://127.0.0.1:8002"
 KEY = "cambia_esta_clave"
 
 def start_server():
-	config = uvicorn.Config(app, host="127.0.0.1", port=8000, log_level="warning")
+	config = uvicorn.Config(app, host="127.0.0.1", port=8002, log_level="warning")
 	server = uvicorn.Server(config)
 	server.run()
 

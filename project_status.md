@@ -1,20 +1,20 @@
-# Project Status - Ollama Priority Proxy v0.2.2
+# Project Status - Ollama Priority Proxy v0.3.0
 
-## Arquitectura: Arquitectura Modular por Capas (Embedded Engine & Priority Scheduler)
-Proxy HTTP y servidor de inferencia local con planificador de prioridades e interrupcion cooperativa por token para ejecucion en hardware con recursos limitados.
+## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights)
+Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad) y pesos compartidos en memoria de solo lectura.
 
 ## Mapeo de Modulos y Responsabilidades
 ### `backend/config.py`
 - `config`: Gestiona variables de entorno, configuraciones de contexto/hilos y resolucion de rutas GGUF.
 
 ### `backend/engine.py`
-- `LlamaEngine`: Encapsula la instancia unica en memoria de llama-cpp-python, calculo de KV RAM y generacion con interrupcion a nivel de token.
+- `LlamaEngine`: Gestiona dos contextos Llama (alta y baja prioridad) compartiendo pesos en solo lectura mediante mmap.
 
 ### `backend/job.py`
-- `Job`: Estructura de datos para solicitudes de chat, completado y generacion con estado de prioridad y colas de emision.
+- `Job`: Estructura de datos para solicitudes de chat, completado y generacion con colas de emision asincronas.
 
 ### `backend/scheduler.py`
-- `Scheduler`: Planificador de cola de prioridad que coordina pausas cooperativas por token y reanudacion inmediata.
+- `Scheduler`: Bucle continuo de evaluacion de 1 token por tick dando prioridad estricta al 100% de la CPU a tareas urgentes.
 
 ### `backend/responses.py`
 - `responses`: Serializador de eventos SSE y respuestas JSON compatibles con OpenAI y Ollama.

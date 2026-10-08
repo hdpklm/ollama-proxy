@@ -14,7 +14,7 @@ messages = {
 	"messages": [
 		{
 			"role": "user",
-			"content": "Di hola en una frase"
+			"content": "Di hola en una frase (solo responde Hola)"
 		}
 	]
 } 
