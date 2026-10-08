@@ -1,7 +1,14 @@
 import json
+import time
 
-from backend.job import CHAT, DELTA, DONE
-from backend.upstream import UpstreamError
+from backend.job import CHAT, DELTA, DONE, GENERATE, Job
+
+
+class EngineError(Exception):
+	pass
+
+
+UpstreamError = EngineError
 
 
 def _sse(payload):
@@ -9,6 +16,14 @@ def _sse(payload):
 
 
 def _chunk(job, text="", finish=None, role=False):
+	if job.kind == GENERATE:
+		return {
+			"response": text,
+			"done": finish is not None,
+			"priority": job.priority,
+			"kv_cache_ram_mb": job.kv_cache_ram_mb,
+		}
+
 	if job.kind == CHAT:
 		delta = {"content": text} if (text or role) else {}
 		if role:
@@ -51,7 +66,18 @@ async def collect_body(job):
 		if event == DONE:
 			break
 		if event != DELTA:
-			raise UpstreamError(value)
+			raise EngineError(value)
+
+	if job.kind == GENERATE:
+		result = {
+			"response": job.partial,
+			"priority": job.priority,
+			"kv_cache_ram_mb": job.kv_cache_ram_mb,
+			"time_seconds": round(time.time() - job.created, 2),
+		}
+		if not job.priority:
+			result["times_paused"] = job.times_paused
+		return result
 
 	usage = {"prompt_tokens": 0, "completion_tokens": job.generated, "total_tokens": job.generated}
 
