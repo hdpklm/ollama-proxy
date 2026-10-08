@@ -23,8 +23,9 @@ def _build_job(kind, body):
 
 	priority = bool(body.pop("priority", False))
 	stream = bool(body.pop("stream", False))
+	fast = bool(body.pop("fast", False))
 	body.pop("stream_options", None)
-	return Job(kind=kind, body=body, priority=priority, stream=stream)
+	return Job(kind=kind, body=body, priority=priority, stream=stream, fast=fast)
 
 
 async def _guarded_stream(job, scheduler):
@@ -100,11 +101,14 @@ async def api_generate(request: Request):
 	stream = bool(body.get("stream", False))
 	max_tokens = int(body.get("max_tokens", 100))
 
+	fast = bool(body.get("fast", False))
+
 	job = Job(
 		kind=GENERATE,
 		body={"prompt": prompt, "max_tokens": max_tokens},
 		priority=priority,
 		stream=stream,
+		fast=fast,
 	)
 	scheduler = request.app.state.scheduler
 	scheduler.submit(job)

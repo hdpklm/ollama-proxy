@@ -18,6 +18,7 @@ class Job:
 	body: dict
 	priority: bool
 	stream: bool
+	fast: bool = False
 	id: str = field(default_factory=lambda: uuid.uuid4().hex)
 	created: int = field(default_factory=lambda: int(time.time()))
 	seq: int = 0

@@ -100,3 +100,14 @@
 	- En `backend/responses.py` se estructuro `usage` con `prompt_token_s`, `generate_token_s`, `prompt_tokens`, `completion_tokens` y `total_tokens`.
 	- En streaming SSE se emite el chunk final con `choices: []` y el objeto `usage` compatible con `stream_options` de OpenAI.
 	- Actualizacion de `test_win/normal.py` y `test_win/urgente.py` para leer directamente estas claves.
+
+### 📝 Registro: [v0.4.2] - Parametro fast por Peticion, Flash Attention y Guia de Overclock
+- **date-time**: 2026-10-09 01:00:00
+- **Problema**:
+	- Necesidad de permitir optimizaciones de maxima velocidad bajo demanda por peticion sin afectar la precision del resto de consultas, documentar overclock seguro en RPi5 y procedimientos de recuperacion.
+- **Causa**:
+	- El muestreo multinomial por defecto añade computo innecesario cuando solo se busca velocidad, y no existia documentacion clara de overclock seguro.
+- **Solución**:
+	- Incorporacion del flag `"fast": true` en JSON de peticiones para activar muestreo voraz (greedy decode `top_k=1, temp=0`).
+	- Activacion de `flash_attn=True` en `LlamaEngine` para optimizar calculos de atencion.
+	- Documentacion completa en `README.md` del parametro `fast`, ajuste de gobernador en RAM, overclock en `/boot/firmware/config.txt` y restauracion en caso de fallo (via PC o hardware safe mode).

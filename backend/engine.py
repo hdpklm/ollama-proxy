@@ -2,7 +2,7 @@ import os
 from typing import Tuple
 from llama_cpp import Llama
 
-from backend.config import N_CTX, N_CTX_HIGH, N_THREADS, resolve_model_path
+from backend.config import FLASH_ATTN, N_CTX, N_CTX_HIGH, N_THREADS, resolve_model_path
 from backend.job import CHAT, Job
 
 
@@ -22,12 +22,14 @@ class LlamaEngine:
 			model_path=self.model_path,
 			n_ctx=N_CTX_HIGH,
 			n_threads=N_THREADS,
+			flash_attn=FLASH_ATTN,
 			verbose=False,
 		)
 		self.llm_low = Llama(
 			model_path=self.model_path,
 			n_ctx=N_CTX,
 			n_threads=N_THREADS,
+			flash_attn=FLASH_ATTN,
 			verbose=False,
 		)
 
@@ -50,11 +52,22 @@ class LlamaEngine:
 		llm = self.llm_high if job.priority else self.llm_low
 		limit = job.body.get("max_tokens") or job.body.get("max_completion_tokens") or 256
 		messages = job.body.get("messages")
+		extra_params = {}
+		if job.fast:
+			extra_params["temperature"] = 0.0
+			extra_params["top_k"] = 1
+		else:
+			if "temperature" in job.body:
+				extra_params["temperature"] = float(job.body["temperature"])
+			if "top_p" in job.body:
+				extra_params["top_p"] = float(job.body["top_p"])
+
 		if messages:
 			return llm.create_chat_completion(
 				messages=messages,
 				max_tokens=limit,
 				stream=True,
+				**extra_params,
 			)
 
 		prompt = str(job.body.get("prompt", ""))
@@ -62,6 +75,7 @@ class LlamaEngine:
 			prompt,
 			max_tokens=limit,
 			stream=True,
+			**extra_params,
 		)
 
 	def extract_chunk(self, job: Job, chunk: dict) -> Tuple[str, str | None]:

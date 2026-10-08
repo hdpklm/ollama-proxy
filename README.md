@@ -216,8 +216,74 @@ curl -X POST http://localhost:8000/api/generate \
 
 ---
 
+### 4. Modo Rápido por Petición (`"fast": true`)
+Si necesitas la máxima velocidad en una petición específica sin perder precisión en el resto:
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer cambia_esta_clave" \
+  -d '{
+    "model": "local",
+    "messages": [{"role": "user", "content": "Responde rapido"}],
+    "fast": true
+  }'
+```
+Al activar `"fast": true`, el decodificador salta el cálculo de probabilidades multinomiales complejas (*greedy sampling* `top_k=1`), acelerando la generación de tokens por segundo.
+
+---
+
+## Optimización de Rendimiento y Overclock en Raspberry Pi 5
+
+### 1. Activar Modo Performance en RAM (Sin tocar archivos)
+Para que los 4 núcleos de la RPi 5 trabajen a 2.4 GHz fijos sin caídas de frecuencia:
+```bash
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+```
+*(Para volver al modo ahorro normal: cambiar `performance` por `ondemand`). No se guarda al reiniciar.*
+
+---
+
+### 2. Overclock Seguro a 2.8 GHz (+16% de velocidad matemática)
+> [!IMPORTANT]
+> Requiere disipador activo (*Active Cooler* oficial de Raspberry Pi).
+
+Edita el archivo de arranque del firmware:
+```bash
+sudo nano /boot/firmware/config.txt
+```
+Añade al final del archivo:
+```ini
+[all]
+arm_freq=2800
+```
+Guarda (`Ctrl+O`, `Enter`) y sal (`Ctrl+X`). Luego reinicia:
+```bash
+sudo reboot
+```
+
+---
+
+### 3. Cómo Restaurar el Overclock si Falla o no Arranca
+
+Si por algún motivo la Raspberry Pi no arranca tras cambiar la frecuencia, recuperarla toma 1 minuto:
+
+#### Método A: Desde tu ordenador (Windows / Linux / Mac)
+1. Apaga la Raspberry Pi y extrae la tarjeta MicroSD (o el SSD/USB).
+2. Conéctala a tu ordenador. Verás una unidad llamada `bootfs` o simplemente un disco con archivos.
+3. Abre el archivo `config.txt` con el Bloc de notas.
+4. Borra la línea `arm_freq=2800` (o pon `arm_freq=2400`).
+5. Guarda el archivo, vuelve a colocar la MicroSD en la Raspberry Pi y arrancará inmediatamente como de fábrica.
+
+#### Método B: Modo Seguro con el botón de encendido (Hardware)
+1. Desconecta el cable de alimentación de la Raspberry Pi 5.
+2. **Mantén presionado el botón de encendido físico** de la Raspberry Pi 5.
+3. Conecta el cable de alimentación mientras mantienes el botón presionado durante 3 segundos.
+4. La Raspberry Pi 5 detectará la pulsación forzada y arrancará en **Modo Seguro (Safe Mode)** ignorando el overclock para que puedas entrar por SSH o pantalla y corregir el archivo.
+
+---
+
 ## Scripts de Prueba Concurrente
 
-Dentro de la carpeta `test_win/` dispones de scripts para comprobar la interrupción preventiva:
-- `python test_win/normal.py`: Lanza una tarea larga en segundo plano.
+Dentro de la carpeta `test_win/` dispones de scripts para comprobar la interrupción preventiva y medir tokens por segundo:
+- `python test_win/normal.py`: Lanza una tarea larga en segundo plano mostrando métricas en streaming.
 - `python test_win/urgente.py`: Dispara una tarea urgente mientras la normal sigue corriendo.
