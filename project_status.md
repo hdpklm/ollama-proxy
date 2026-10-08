@@ -1,4 +1,4 @@
-# Project Status - Ollama Priority Proxy v0.3.0
+# Project Status - Ollama Priority Proxy v0.3.1
 
 ## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights)
 Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad) y pesos compartidos en memoria de solo lectura.
