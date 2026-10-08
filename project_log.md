@@ -78,3 +78,25 @@
 	- La definicion de dependencias requería selectores condicionales según plataforma y arquitectura (PEP 508 / uv sources).
 - **Solución**:
 	- Incorporacion de `[tool.uv.sources]` en `pyproject.toml` con marker `sys_platform == 'linux' and platform_machine == 'aarch64'` apuntando a GitHub Release y fallback automático a PyPI estándar en el resto de plataformas.
+
+### 📝 Registro: [v0.4.0] - Medicion y Visualizacion de Tokens por Segundo (Prompt y Generacion)
+- **date-time**: 2026-10-09 00:25:00
+- **Problema**:
+	- Ausencia de medicion precisa de tokens por segundo tanto para la fase de evaluacion de prompt (prefill t/s) como de generacion de texto (decode t/s).
+- **Causa**:
+	- `backend/job.py`, `backend/scheduler.py` y `backend/responses.py` no registraban las marcas de tiempo entre primer token y finalizacion ni exponian metricas de tps en respuestas JSON/SSE.
+- **Solución**:
+	- Incorporacion de campos de medicion temporal en `Job` y calculo automatico en `Scheduler._token_loop`.
+	- Exposicion de `prompt_eval_tokens_per_second` y `generation_tokens_per_second` en `usage` (OpenAI), SSE streaming chunks y endpoint `/api/generate`.
+	- Actualizacion de `test_win/normal.py` y `test_win/urgente.py` para calcular y mostrar estadisticas detalladas tanto en cliente como en servidor.
+
+### 📝 Registro: [v0.4.1] - Exactitud en API OpenAI con Claves prompt_token_s y generate_token_s
+- **date-time**: 2026-10-09 00:27:00
+- **Problema**:
+	- Requerimiento de compatibilidad estricta con API OpenAI manteniendo los nombres exactos de campos solicitados: `priority`, `prompt_token_s`, `generate_token_s` y prefijo `chatcmpl-`.
+- **Causa**:
+	- Las claves de metricas tenian nombres largos en lugar de exponer las claves exactas requeridas por el cliente.
+- **Solución**:
+	- En `backend/responses.py` se estructuro `usage` con `prompt_token_s`, `generate_token_s`, `prompt_tokens`, `completion_tokens` y `total_tokens`.
+	- En streaming SSE se emite el chunk final con `choices: []` y el objeto `usage` compatible con `stream_options` de OpenAI.
+	- Actualizacion de `test_win/normal.py` y `test_win/urgente.py` para leer directamente estas claves.

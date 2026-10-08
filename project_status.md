@@ -1,7 +1,7 @@
-# Project Status - Ollama Priority Proxy v0.3.4
+# Project Status - Ollama Priority Proxy v0.4.1
 
 ## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights)
-Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad) y pesos compartidos en memoria de solo lectura.
+Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura y metricas de rendimiento en tiempo real (prompt t/s y generation t/s).
 
 ## Mapeo de Modulos y Responsabilidades
 ### `backend/config.py`

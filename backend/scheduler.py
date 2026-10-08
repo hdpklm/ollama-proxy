@@ -54,6 +54,8 @@ class Scheduler:
 				if self.current_high is None:
 					try:
 						self.current_high = self.high_queue.get_nowait()
+						self.current_high.prompt_tokens = self.engine.count_prompt_tokens(self.current_high)
+						self.current_high.t_start = time.time()
 						self.stream_high = self.engine.create_stream(self.current_high)
 					except Exception as err:
 						if self.current_high and self.loop:
@@ -69,14 +71,26 @@ class Scheduler:
 
 				try:
 					chunk = next(self.stream_high)
+					now = time.time()
+					if self.current_high.t_first_token == 0.0:
+						self.current_high.t_first_token = now
+						self.current_high.prompt_eval_seconds = max(now - self.current_high.t_start, 0.001)
+						self.current_high.prompt_tps = round(self.current_high.prompt_tokens / self.current_high.prompt_eval_seconds, 2)
+
 					text, finish = self.engine.extract_chunk(self.current_high, chunk)
 					if text:
 						self.current_high.partial += text
 						self.current_high.generated += 1
+						gen_time = max(now - self.current_high.t_first_token, 0.001)
+						self.current_high.generation_seconds = round(gen_time, 2)
+						self.current_high.generation_tps = round(self.current_high.generated / gen_time, 2)
 						if self.loop:
 							self.loop.call_soon_threadsafe(self.current_high.out.put_nowait, (DELTA, text))
 
 					if finish is not None:
+						gen_time = max(time.time() - self.current_high.t_first_token, 0.001) if self.current_high.t_first_token else 0.001
+						self.current_high.generation_seconds = round(gen_time, 2)
+						self.current_high.generation_tps = round(self.current_high.generated / gen_time, 2)
 						if self.loop:
 							self.loop.call_soon_threadsafe(self.current_high.out.put_nowait, (DONE, finish))
 						self.current_high = None
@@ -97,6 +111,8 @@ class Scheduler:
 				if self.current_low is None:
 					try:
 						self.current_low = self.low_queue.get_nowait()
+						self.current_low.prompt_tokens = self.engine.count_prompt_tokens(self.current_low)
+						self.current_low.t_start = time.time()
 						self.stream_low = self.engine.create_stream(self.current_low)
 					except Exception as err:
 						if self.current_low and self.loop:
@@ -112,14 +128,26 @@ class Scheduler:
 
 				try:
 					chunk = next(self.stream_low)
+					now = time.time()
+					if self.current_low.t_first_token == 0.0:
+						self.current_low.t_first_token = now
+						self.current_low.prompt_eval_seconds = max(now - self.current_low.t_start, 0.001)
+						self.current_low.prompt_tps = round(self.current_low.prompt_tokens / self.current_low.prompt_eval_seconds, 2)
+
 					text, finish = self.engine.extract_chunk(self.current_low, chunk)
 					if text:
 						self.current_low.partial += text
 						self.current_low.generated += 1
+						gen_time = max(now - self.current_low.t_first_token, 0.001)
+						self.current_low.generation_seconds = round(gen_time, 2)
+						self.current_low.generation_tps = round(self.current_low.generated / gen_time, 2)
 						if self.loop:
 							self.loop.call_soon_threadsafe(self.current_low.out.put_nowait, (DELTA, text))
 
 					if finish is not None:
+						gen_time = max(time.time() - self.current_low.t_first_token, 0.001) if self.current_low.t_first_token else 0.001
+						self.current_low.generation_seconds = round(gen_time, 2)
+						self.current_low.generation_tps = round(self.current_low.generated / gen_time, 2)
 						if self.loop:
 							self.loop.call_soon_threadsafe(self.current_low.out.put_nowait, (DONE, finish))
 						self.current_low = None
