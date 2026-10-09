@@ -8,7 +8,7 @@ WORKDIR /app
 COPY pyproject.toml uv.loc[k] ./
 RUN uv sync --no-install-project --no-dev
 
-COPY compile-llama-cpp/output ./compile-llama-cpp/output
+COPY compile-llama-cpp ./compile-llama-cpp
 RUN ARCH=$(uname -m) && \
 	CUSTOM_WHEEL=$(ls /app/compile-llama-cpp/output/*${ARCH}*.whl 2>/dev/null | head -n 1 || true) && \
 	if [ -n "$CUSTOM_WHEEL" ] && [ -f "$CUSTOM_WHEEL" ]; then \

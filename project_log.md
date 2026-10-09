@@ -149,3 +149,12 @@
 - **Solución**:
 	- Creacion del modulo `compile-llama-cpp/` con `compile_linux.sh` y `compile_windows.bat`.
 	- Deteccion automatica de arquitectura (`uname -m` en Linux, `%PROCESSOR_ARCHITECTURE%` en Windows), aislamiento en entornos temporales y copia en `output/` con nombres de arquitectura (`llama_cpp_python-linux-{ARCH}.whl` y `llama_cpp_python-windows-{ARCH}.whl`).
+
+### 📝 Registro: [v0.5.2] - Correccion de copia de directorio compile-llama-cpp en Dockerfile
+- **date-time**: 2026-10-09 16:47:00
+- **Problema**:
+- `docker compose build` fallaba en la Raspberry Pi 5 con el error `"/compile-llama-cpp/output": not found` al clonar limpiamente el repositorio.
+- **Causa**:
+- La carpeta `output/` esta excluida en `.gitignore` y no existe inicialmente en un clon limpio, por lo que una directiva `COPY compile-llama-cpp/output` fallaba al calcular el checksum de BuildKit.
+- **Solución**:
+- Se modifico la directiva a `COPY compile-llama-cpp ./compile-llama-cpp`. El directorio padre siempre existe en el repositorio, permitiendo compilar la imagen sin errores independientemente de si el usuario ha generado o no wheels previamente.
