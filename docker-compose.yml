@@ -1,0 +1,12 @@
+services:
+  ollama-proxy:
+    build: .
+    container_name: ollama-proxy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ${OLLAMA_MODELS_DIR:-/usr/share/ollama/.ollama/models/blobs}:/usr/share/ollama/.ollama/models/blobs:ro
+      - ./modelos:/app/modelos:ro
+    restart: unless-stopped

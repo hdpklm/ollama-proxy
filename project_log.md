@@ -111,3 +111,41 @@
 	- Incorporacion del flag `"fast": true` en JSON de peticiones para activar muestreo voraz (greedy decode `top_k=1, temp=0`).
 	- Activacion de `flash_attn=True` en `LlamaEngine` para optimizar calculos de atencion.
 	- Documentacion completa en `README.md` del parametro `fast`, ajuste de gobernador en RAM, overclock en `/boot/firmware/config.txt` y restauracion en caso de fallo (via PC o hardware safe mode).
+
+### 📝 Registro: [v0.4.3] - Correccion de Dockerfile para Despliegue con Volúmenes
+- **date-time**: 2026-10-09 15:45:00
+- **Problema**:
+	- `Dockerfile` solo copiaba `*.py` de la raíz omitiendo el paquete `backend/`, impidiendo la ejecución en contenedor Docker.
+- **Causa**:
+	- Patrón de copia incompleto en la capa de aplicación de Dockerfile.
+- **Solución**:
+	- Modificación de `Dockerfile` para copiar explícitamente `backend/` y `main.py`, manteniendo montaje de volúmenes de modelos externos en solo lectura.
+
+### 📝 Registro: [v0.4.4] - Creacion de docker-compose.yml con Montaje de Modelos
+- **date-time**: 2026-10-09 15:51:00
+- **Problema**:
+	- Ausencia de configuracion declarativa Docker Compose para levantar el proxy y mapear los volumenes del modelo sin comandos largos de consola.
+- **Causa**:
+	- Se dependia de instrucciones manuales de `docker run` propensas a errores en rutas y variables de entorno.
+- **Solución**:
+	- Creacion de `docker-compose.yml` con mapeo de volumenes en modo solo lectura (`/usr/share/ollama/.ollama/models/blobs` y `./modelos`), lectura de `.env` y exposicion del puerto 8000.
+	- Documentacion de comandos de ciclo de vida (`docker compose up -d --build`, `logs -f`, `down`) en `README.md`.
+
+### 📝 Registro: [v0.4.5] - Optimizacion Ligera de Dockerfile para RPi5 sin Compiladores
+- **date-time**: 2026-10-09 16:05:00
+- **Problema**:
+	- Intentar compilar en Dockerfile con `build-essential` consumia exceso de RAM en maquinas con limites estrictos y aumentaba el tamaño de la imagen en +800 MB innecesariamente para la SD de la Raspberry Pi.
+- **Causa**:
+	- Se añadian herramientas de compilacion innecesarias dado que para la arquitectura destino (RPi 5 / ARM64) ya existe el wheel precompilado en GitHub Releases.
+- **Solución**:
+	- Eliminacion de paquetes de compilacion del Dockerfile, manteniendo la imagen en modo ultraligero (~180 MB) donde `uv sync` descarga directamente el wheel `.whl` optimizado en 2 segundos.
+
+### 📝 Registro: [v0.5.0] - Scripts Automatizados de Compilacion de Wheels (compile-llama-cpp)
+- **date-time**: 2026-10-09 16:09:00
+- **Problema**:
+	- Ausencia de scripts reproducibles para generar y empaquetar binarios wheels (`.whl`) de `llama-cpp-python` optimizados nativamente según la arquitectura de hardware.
+- **Causa**:
+	- La compilacion dependia de comandos manuales en consola sin nomenclatura estandarizada por plataforma ni carpeta dedicada de salida.
+- **Solución**:
+	- Creacion del modulo `compile-llama-cpp/` con `compile_linux.sh` y `compile_windows.bat`.
+	- Deteccion automatica de arquitectura (`uname -m` en Linux, `%PROCESSOR_ARCHITECTURE%` en Windows), aislamiento en entornos temporales y copia en `output/` con nombres de arquitectura (`llama_cpp_python-linux-{ARCH}.whl` y `llama_cpp_python-windows-{ARCH}.whl`).

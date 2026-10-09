@@ -14,6 +14,19 @@ def resolve_model_path(model_name: str | None = None) -> str:
 	if MODEL_PATH and os.path.exists(MODEL_PATH):
 		return MODEL_PATH
 
+	if MODEL_PATH:
+		blob_filename = os.path.basename(MODEL_PATH.replace("\\", "/"))
+		search_dirs = [
+			"/usr/share/ollama/.ollama/models/blobs",
+			"./modelos",
+			"/app/modelos",
+			"/models",
+		]
+		for d in search_dirs:
+			candidate = os.path.join(d, blob_filename)
+			if os.path.exists(candidate):
+				return candidate
+
 	candidates = [model_name] if model_name else ["gemma4:e2b", "llama3.2:1b"]
 
 	for name in candidates:

@@ -1,3 +1,6 @@
 .env
 __pycache__/
 LLM_Test/gemini/logs/
+compile-llama-cpp/.tmp_venv/
+compile-llama-cpp/output/
+modelos/

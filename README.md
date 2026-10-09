@@ -171,6 +171,20 @@ O manualmente:
 uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
+### Con Docker Compose (Recomendado)
+El proyecto incluye un [docker-compose.yml](file:///c:/work/person/hassan/Repos/ollama-proxy/docker-compose.yml) listo para producción, montando automáticamente la carpeta de modelos en solo lectura y leyendo tu `.env`:
+
+```bash
+# Construir e iniciar en segundo plano:
+docker compose up -d --build
+
+# Ver los logs en tiempo real:
+docker compose logs -f
+
+# Detener el contenedor:
+docker compose down
+```
+
 El servidor estará escuchando en `http://0.0.0.0:8000`.
 
 ---
