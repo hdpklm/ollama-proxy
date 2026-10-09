@@ -167,3 +167,12 @@
 - La variable de entorno `UV_COMPILE_BYTECODE=1` forzaba la invocacion concurrente de subprocesos Python para compilar 888 archivos `.py`, lo que provocaba contencion de I/O en la tarjeta MicroSD y superaba el tiempo maximo de espera (timeout de 60s).
 - **Solución**:
 - Se configuro `UV_COMPILE_BYTECODE=0` y se añadio `--no-compile-bytecode` en el comando `uv sync` de `Dockerfile`, evitando llamadas innecesarias y acelerando el tiempo de construccion de la imagen.
+
+### 📝 Registro: [v0.5.4] - Correccion de sintaxis booleana para UV_COMPILE_BYTECODE en Dockerfile
+- **date-time**: 2026-10-09 20:05:00
+- **Problema**:
+- Al intentar desactivar la compilacion de bytecode en la Raspberry Pi 5, `uv sync` fallo con `error: the argument '--no-compile-bytecode' cannot be used with '--compile-bytecode'` al no existir dicha bandera en CLI.
+- **Causa**:
+- La imagen base de `uv` define `ENV UV_COMPILE_BYTECODE=1`. Para desactivar la compilacion de bytecode en `uv`, no existe un argumento `--no-compile-bytecode` en CLI, sino que se debe sobreescribir la variable de entorno booleana con `UV_COMPILE_BYTECODE=false`.
+- **Solución**:
+- Se elimino la bandera invalida de la llamada `uv sync` en `Dockerfile` y se configuro estrictamente `ENV UV_COMPILE_BYTECODE=false`, desactivando la precompilacion de bytecode de forma nativa sin errores de parser.
