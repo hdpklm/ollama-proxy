@@ -158,3 +158,12 @@
 - La carpeta `output/` esta excluida en `.gitignore` y no existe inicialmente en un clon limpio, por lo que una directiva `COPY compile-llama-cpp/output` fallaba al calcular el checksum de BuildKit.
 - **Solución**:
 - Se modifico la directiva a `COPY compile-llama-cpp ./compile-llama-cpp`. El directorio padre siempre existe en el repositorio, permitiendo compilar la imagen sin errores independientemente de si el usuario ha generado o no wheels previamente.
+
+### 📝 Registro: [v0.5.3] - Desactivacion de compilacion de bytecode Python en Dockerfile
+- **date-time**: 2026-10-09 18:01:00
+- **Problema**:
+- Durante `docker compose up -d --build` en la Raspberry Pi 5, `uv sync` fallaba con `Python startup timed out (60s)` al intentar precompilar los archivos `.py` a bytecode (`.pyc`).
+- **Causa**:
+- La variable de entorno `UV_COMPILE_BYTECODE=1` forzaba la invocacion concurrente de subprocesos Python para compilar 888 archivos `.py`, lo que provocaba contencion de I/O en la tarjeta MicroSD y superaba el tiempo maximo de espera (timeout de 60s).
+- **Solución**:
+- Se configuro `UV_COMPILE_BYTECODE=0` y se añadio `--no-compile-bytecode` en el comando `uv sync` de `Dockerfile`, evitando llamadas innecesarias y acelerando el tiempo de construccion de la imagen.

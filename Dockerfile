@@ -1,12 +1,12 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
-ENV UV_COMPILE_BYTECODE=1 \
+ENV UV_COMPILE_BYTECODE=0 \
 	UV_LINK_MODE=copy
 
 WORKDIR /app
 
 COPY pyproject.toml uv.loc[k] ./
-RUN uv sync --no-install-project --no-dev
+RUN uv sync --no-install-project --no-dev --no-compile-bytecode
 
 COPY compile-llama-cpp ./compile-llama-cpp
 RUN ARCH=$(uname -m) && \
