@@ -165,56 +165,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/ec/e9/e7de2b0463ea3ffbf
 [[package]]
 name = "llama-cpp-python"
 version = "0.3.36"
-source = { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.36/llama_cpp_python-0.3.36-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl" }
-resolution-markers = [
-    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-]
-dependencies = [
-    { name = "diskcache", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
-    { name = "jinja2", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'" },
-    { name = "typing-extensions", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
-]
-wheels = [
-    { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.36/llama_cpp_python-0.3.36-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:410bdf3cf66478f55de0ad51dd6ab241424591bdd36aff086b000d155ac182c6" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "diskcache", specifier = ">=5.6.1" },
-    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100.0" },
-    { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.100.0" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.24.1" },
-    { name = "httpx", marker = "extra == 'test'", specifier = ">=0.24.1" },
-    { name = "huggingface-hub", marker = "extra == 'test'", specifier = ">=0.23.0" },
-    { name = "jinja2", specifier = ">=2.11.3" },
-    { name = "llama-cpp-python", extras = ["dev", "server", "test"], marker = "extra == 'all'" },
-    { name = "mkdocs", marker = "extra == 'dev'", specifier = ">=1.4.3" },
-    { name = "mkdocs-material", marker = "extra == 'dev'", specifier = ">=9.1.18" },
-    { name = "mkdocstrings", extras = ["python"], marker = "extra == 'dev'", specifier = ">=0.22.0" },
-    { name = "numpy", specifier = ">=1.20.0" },
-    { name = "pydantic-settings", marker = "extra == 'server'", specifier = ">=2.0.1" },
-    { name = "pydantic-settings", marker = "extra == 'test'", specifier = ">=2.0.1" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=7.4.0" },
-    { name = "pyyaml", marker = "extra == 'server'", specifier = ">=5.1" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.7" },
-    { name = "scipy", marker = "extra == 'test'", specifier = ">=1.10" },
-    { name = "sse-starlette", marker = "extra == 'server'", specifier = ">=1.6.1" },
-    { name = "sse-starlette", marker = "extra == 'test'", specifier = ">=1.6.1" },
-    { name = "starlette-context", marker = "extra == 'server'", specifier = ">=0.3.6,<0.4" },
-    { name = "starlette-context", marker = "extra == 'test'", specifier = ">=0.3.6,<0.4" },
-    { name = "twine", marker = "extra == 'dev'", specifier = ">=4.0.2" },
-    { name = "typing-extensions", specifier = ">=4.5.0" },
-    { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.22.0" },
-]
-provides-extras = ["server", "test", "dev", "all"]
-
-[[package]]
-name = "llama-cpp-python"
-version = "0.3.36"
 source = { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.36/llama_cpp_python-0.3.36-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl" }
 resolution-markers = [
     "python_full_version >= '3.12' and platform_machine == 'x86_64' and sys_platform == 'linux'",
@@ -279,6 +229,56 @@ dependencies = [
 ]
 wheels = [
     { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.36/llama_cpp_python-0.3.36-py3-none-win_amd64.whl", hash = "sha256:ae5e88a2cf464e5a2dde7c8898c2d5c71cc24d03cac6396bf7509456bde0b9fb" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "diskcache", specifier = ">=5.6.1" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100.0" },
+    { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.100.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.24.1" },
+    { name = "httpx", marker = "extra == 'test'", specifier = ">=0.24.1" },
+    { name = "huggingface-hub", marker = "extra == 'test'", specifier = ">=0.23.0" },
+    { name = "jinja2", specifier = ">=2.11.3" },
+    { name = "llama-cpp-python", extras = ["dev", "server", "test"], marker = "extra == 'all'" },
+    { name = "mkdocs", marker = "extra == 'dev'", specifier = ">=1.4.3" },
+    { name = "mkdocs-material", marker = "extra == 'dev'", specifier = ">=9.1.18" },
+    { name = "mkdocstrings", extras = ["python"], marker = "extra == 'dev'", specifier = ">=0.22.0" },
+    { name = "numpy", specifier = ">=1.20.0" },
+    { name = "pydantic-settings", marker = "extra == 'server'", specifier = ">=2.0.1" },
+    { name = "pydantic-settings", marker = "extra == 'test'", specifier = ">=2.0.1" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=7.4.0" },
+    { name = "pyyaml", marker = "extra == 'server'", specifier = ">=5.1" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.7" },
+    { name = "scipy", marker = "extra == 'test'", specifier = ">=1.10" },
+    { name = "sse-starlette", marker = "extra == 'server'", specifier = ">=1.6.1" },
+    { name = "sse-starlette", marker = "extra == 'test'", specifier = ">=1.6.1" },
+    { name = "starlette-context", marker = "extra == 'server'", specifier = ">=0.3.6,<0.4" },
+    { name = "starlette-context", marker = "extra == 'test'", specifier = ">=0.3.6,<0.4" },
+    { name = "twine", marker = "extra == 'dev'", specifier = ">=4.0.2" },
+    { name = "typing-extensions", specifier = ">=4.5.0" },
+    { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.22.0" },
+]
+provides-extras = ["server", "test", "dev", "all"]
+
+[[package]]
+name = "llama-cpp-python"
+version = "0.3.36"
+source = { url = "https://github.com/hdpklm/ollama-proxy/releases/download/v0.3.36-rpi5/llama_cpp_python-0.3.36-py3-none-linux_aarch64.whl" }
+resolution-markers = [
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+]
+dependencies = [
+    { name = "diskcache", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
+    { name = "jinja2", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'" },
+    { name = "typing-extensions", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
+]
+wheels = [
+    { url = "https://github.com/hdpklm/ollama-proxy/releases/download/v0.3.36-rpi5/llama_cpp_python-0.3.36-py3-none-linux_aarch64.whl", hash = "sha256:deb06d4ca043227725d78a312f2e8dba81763854fed501c617395ee907d7ce31" },
 ]
 
 [package.metadata]
@@ -612,9 +612,9 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "llama-cpp-python", version = "0.3.36", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')" },
-    { name = "llama-cpp-python", version = "0.3.36", source = { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.36/llama_cpp_python-0.3.36-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "llama-cpp-python", version = "0.3.36", source = { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.36/llama_cpp_python-0.3.36-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "llama-cpp-python", version = "0.3.36", source = { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.36/llama_cpp_python-0.3.36-py3-none-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
+    { name = "llama-cpp-python", version = "0.3.36", source = { url = "https://github.com/hdpklm/ollama-proxy/releases/download/v0.3.36-rpi5/llama_cpp_python-0.3.36-py3-none-linux_aarch64.whl" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "uvicorn" },
 ]
 
@@ -623,7 +623,7 @@ requires-dist = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "llama-cpp-python", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')" },
-    { name = "llama-cpp-python", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.36/llama_cpp_python-0.3.36-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl" },
+    { name = "llama-cpp-python", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", url = "https://github.com/hdpklm/ollama-proxy/releases/download/v0.3.36-rpi5/llama_cpp_python-0.3.36-py3-none-linux_aarch64.whl" },
     { name = "llama-cpp-python", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.36/llama_cpp_python-0.3.36-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl" },
     { name = "llama-cpp-python", marker = "sys_platform == 'win32'", url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.36/llama_cpp_python-0.3.36-py3-none-win_amd64.whl" },
     { name = "uvicorn" },

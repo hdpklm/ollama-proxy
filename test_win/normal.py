@@ -9,7 +9,7 @@ KEY = os.getenv("KEY", "cambia_esta_clave")
 
 messages = {
 	"model": "gemma4:e2b",
-	"stream": False,
+	"stream": True,
 	"max_tokens": 500,
 	"fast": True,
 	"messages": [

@@ -176,3 +176,12 @@
 - La imagen base de `uv` define `ENV UV_COMPILE_BYTECODE=1`. Para desactivar la compilacion de bytecode en `uv`, no existe un argumento `--no-compile-bytecode` en CLI, sino que se debe sobreescribir la variable de entorno booleana con `UV_COMPILE_BYTECODE=false`.
 - **Solución**:
 - Se elimino la bandera invalida de la llamada `uv sync` en `Dockerfile` y se configuro estrictamente `ENV UV_COMPILE_BYTECODE=false`, desactivando la precompilacion de bytecode de forma nativa sin errores de parser.
+
+### 📝 Registro: [v0.5.5] - Restauracion de wheel compilado RPi5 para linux aarch64
+- **date-time**: 2026-10-10 01:07:00
+- **Problema**:
+- En Docker en la Raspberry Pi 5 se estaba descargando la rueda oficial generica de abetlen en lugar de la version compilada optimizada para RPi5, reduciendo la velocidad de 6.56 t/s a 5.66 t/s.
+- **Causa**:
+- La entrada `linux and aarch64` en `pyproject.toml` habia sido sustituida por el wheel oficial manylinux en lugar de la release de GitHub generada para RPi5.
+- **Solución**:
+- Se restauro la fuente de `llama-cpp-python` para `sys_platform == 'linux' and platform_machine == 'aarch64'` apuntando a `https://github.com/hdpklm/ollama-proxy/releases/download/v0.3.36-rpi5/llama_cpp_python-0.3.36-py3-none-linux_aarch64.whl`, permitiendo que Docker en RPi5 detecte la arquitectura y descargue el wheel optimizado sin pasar argumentos manuales.
