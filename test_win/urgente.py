@@ -42,36 +42,55 @@ def main():
 	tokens = 0
 	server_usage = None
 
+	is_stream = messages.get("stream", False)
+
 	with open_stream() as response:
-		for raw in response:
-			line = raw.decode("utf-8").strip()
-			if not line.startswith("data:"):
-				continue
-			data = line[5:].strip()
-			if data == "[DONE]":
-				break
-			parsed = json.loads(data)
-			if "usage" in parsed and parsed["usage"]:
-				server_usage = parsed["usage"]
+		if is_stream:
+			for raw in response:
+				line = raw.decode("utf-8").strip()
+				if not line.startswith("data:"):
+					continue
+				data = line[5:].strip()
+				if data == "[DONE]":
+					break
+				parsed = json.loads(data)
+				if "usage" in parsed and parsed["usage"]:
+					server_usage = parsed["usage"]
+				choices = parsed.get("choices")
+				if choices and len(choices) > 0:
+					delta = choices[0].get("delta", {}).get("content") or ""
+					if delta:
+						if t_first is None:
+							t_first = time.time()
+						tokens += 1
+						print(delta, end="", flush=True)
+		else:
+			raw_body = response.read().decode("utf-8")
+			t_first = time.time()
+			parsed = json.loads(raw_body)
+			server_usage = parsed.get("usage")
 			choices = parsed.get("choices")
 			if choices and len(choices) > 0:
-				delta = choices[0].get("delta", {}).get("content") or ""
-				if delta:
-					if t_first is None:
-						t_first = time.time()
-					tokens += 1
-					print(delta, end="", flush=True)
+				content = choices[0].get("message", {}).get("content") or choices[0].get("text") or ""
+				print(content, flush=True)
+			tokens = server_usage.get("completion_tokens", 0) if server_usage else 0
 
 	t_end = time.time()
 	print("\n" + "=" * 60)
-	gen_time = (t_end - t_first) if t_first else (t_end - t_start)
+	if is_stream:
+		gen_time = (t_end - t_first) if t_first else (t_end - t_start)
+		ttft = (t_first - t_start) if t_first else 0.0
+	else:
+		gen_time = t_end - t_start
+		ttft = gen_time
+
 	tps_client = tokens / max(gen_time, 0.001)
-	ttft = (t_first - t_start) if t_first else 0.0
 
 	print("[METRICAS URGENTE - CLIENTE]:")
 	print(f"  Tokens generados:       {tokens}")
-	print(f"  Tiempo al primer token: {ttft:.3f} s")
-	print(f"  Tiempo de generacion:   {gen_time:.3f} s")
+	if is_stream:
+		print(f"  Tiempo al primer token: {ttft:.3f} s")
+	print(f"  Tiempo total respuesta: {gen_time:.3f} s")
 	print(f"  Velocidad generacion:   {tps_client:.2f} tokens/s")
 
 	if server_usage:
