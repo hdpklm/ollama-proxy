@@ -185,3 +185,30 @@
 - La entrada `linux and aarch64` en `pyproject.toml` habia sido sustituida por el wheel oficial manylinux en lugar de la release de GitHub generada para RPi5.
 - **Solución**:
 - Se restauro la fuente de `llama-cpp-python` para `sys_platform == 'linux' and platform_machine == 'aarch64'` apuntando a `https://github.com/hdpklm/ollama-proxy/releases/download/v0.3.36-rpi5/llama_cpp_python-0.3.36-py3-none-linux_aarch64.whl`, permitiendo que Docker en RPi5 detecte la arquitectura y descargue el wheel optimizado sin pasar argumentos manuales.
+
+### 📝 Registro: [v0.5.6] - Incorporacion de libreria de runtime OpenMP (libgomp1) en Dockerfile
+- **date-time**: 2026-10-10 01:44:00
+- **Problema**:
+- El contenedor fallaba en el arranque con `RuntimeError: Failed to load shared library '/app/.venv/.../libllama.so': libgomp.so.1: cannot open shared object file: No such file or directory`.
+- **Causa**:
+- El wheel nativo compilado en la Raspberry Pi 5 utiliza paralelismo OpenMP para acelerar el procesamiento en los 4 cores de la CPU. La imagen base bookworm-slim no incluye la libreria de enlace dinamico en tiempo de ejecucion `libgomp.so.1`.
+- **Solución**:
+- Se añadio la instalacion del paquete ligero de runtime `libgomp1` mediante apt-get sin compiladores en `Dockerfile` (`--no-install-recommends libgomp1`), permitiendo la carga exitosa de la libreria C++ nativa `libllama.so`.
+
+### 📝 Registro: [v0.5.7] - Actualizacion de imagen base a Ubuntu 24.04 (Noble) por version GLIBC 2.38
+- **date-time**: 2026-10-10 02:07:00
+- **Problema**:
+- El contenedor fallaba al iniciar Uvicorn con `RuntimeError: Failed to load shared library 'libllama.so': /lib/aarch64-linux-gnu/libc.so.6: version 'GLIBC_2.38' not found`.
+- **Causa**:
+- El binario `libllama.so` compilado nativamente en la Raspberry Pi 5 requiere la version de GNU C Library 2.38 (GLIBC 2.38). La imagen base anterior (`debian:bookworm-slim`) solo dispone de GLIBC 2.36.
+- **Solución**:
+- Se actualizo la imagen base a `ubuntu:24.04` (que incorpora GLIBC 2.39 retrocompatible con 2.38), instalando `python3`, `python3-venv`, `libgomp1` e importando el binario oficial de `uv` (`ghcr.io/astral-sh/uv:latest`), permitiendo la carga exitosa de la libreria C++ nativa de alta velocidad.
+
+### 📝 Registro: [v0.5.8] - Optimizacion de rendimiento Docker con network_mode e ipc host
+- **date-time**: 2026-10-12 01:05:00
+- **Problema**:
+- Overhead de ~7% en la velocidad de generacion dentro de Docker en la Raspberry Pi 5 (6.07 t/s vs 6.56 t/s nativo) debido al aislamiento del puente de red virtual y capa IPC de contenedor.
+- **Causa**:
+- La red virtual tipo bridge de Docker y el aislamiento de IPC introducen latencia de filtrado de paquetes y restricciones en memoria compartida.
+- **Solución**:
+- Se configuraron `network_mode: "host"` e `ipc: "host"` en `docker-compose.yml`, eliminando el puente virtual de red y permitiendo acceso de memoria compartida nativo en la Raspberry Pi 5.
