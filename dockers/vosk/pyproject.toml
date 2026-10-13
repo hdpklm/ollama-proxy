@@ -1,0 +1,13 @@
+[project]
+name = "vosk-stt-service"
+version = "0.1.0"
+description = "FastAPI HTTP and WebSocket service for Vosk STT"
+requires-python = ">=3.11"
+dependencies = [
+	"fastapi>=0.110.0",
+	"uvicorn[standard]>=0.28.0",
+	"vosk>=0.3.45",
+	"websockets>=12.0",
+	"requests>=2.31.0",
+	"python-multipart>=0.0.9",
+]

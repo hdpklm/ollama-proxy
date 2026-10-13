@@ -1,13 +1,95 @@
+# ==============================================================================
+# NOTA DE ARQUITECTURA DE RED Y COMUNICACION INTER-CONTENEDOR:
+# ==============================================================================
+# Todos los servicios comparten la red interna de Docker 'ollama-net'.
+# El DNS interno de Docker resuelve automaticamente los nombres de servicio:
+#   - LLM Proxy:  http://ollama-proxy:8000
+#   - TTS Piper:  http://piper-tts:5000
+#   - STT Vosk:   http://vosk-stt:2700  (o ws://vosk-stt:2700)
+#   - Web UI:     http://interface:8080
+#
+# Para acceder desde fuera del servidor (navegador web o scripts remotos),
+# los puertos 8000 y 8080 estan mapeados directamente al host.
+# ==============================================================================
+
 services:
   ollama-proxy:
     build: .
     container_name: ollama-proxy
     command: uv run --no-sync uvicorn main:app --host 0.0.0.0 --port 8000
-    network_mode: "host"
     ipc: "host"
+    networks:
+      - ollama-net
+    ports:
+      - "8000:8000"
     env_file:
       - .env
     volumes:
       - ${OLLAMA_MODELS_DIR:-/usr/share/ollama/.ollama/models/blobs}:/usr/share/ollama/.ollama/models/blobs:ro
       - ./modelos:/app/modelos:ro
+      - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
     restart: unless-stopped
+
+  interface:
+    build:
+      context: ./interface
+      dockerfile: Dockerfile
+    container_name: interface
+    networks:
+      - ollama-net
+    ports:
+      - "8080:8080"
+    env_file:
+      - path: .env
+        required: false
+      - path: ./interface/.env
+        required: false
+    environment:
+      - PORT=8080
+      - LLM_URL=http://ollama-proxy:8000
+      - TTS_URL=http://piper-tts:5000
+      - STT_URL=http://vosk-stt:2700
+      - UV_CACHE_DIR=/root/.cache/uv
+    volumes:
+      - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
+    restart: unless-stopped
+
+  piper-tts:
+    build:
+      context: ./dockers/piper
+      dockerfile: Dockerfile
+    container_name: piper-tts
+    networks:
+      - ollama-net
+    ports:
+      - "5000:5000"
+    environment:
+      - MODELS_DIR=/app/modelos
+      - VOICE_NAME=es_ES-sharvard-medium
+      - UV_CACHE_DIR=/root/.cache/uv
+    volumes:
+      - ./modelos/piper:/app/modelos
+      - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
+    restart: unless-stopped
+
+  vosk-stt:
+    build:
+      context: ./dockers/vosk
+      dockerfile: Dockerfile
+    container_name: vosk-stt
+    networks:
+      - ollama-net
+    ports:
+      - "2700:2700"
+    environment:
+      - MODELS_DIR=/app/modelos
+      - UV_CACHE_DIR=/root/.cache/uv
+    volumes:
+      - ./modelos/vosk:/app/modelos
+      - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
+    restart: unless-stopped
+
+networks:
+  ollama-net:
+    name: ollama-net
+    driver: bridge

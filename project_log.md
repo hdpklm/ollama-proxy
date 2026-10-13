@@ -212,3 +212,72 @@
 - La red virtual tipo bridge de Docker y el aislamiento de IPC introducen latencia de filtrado de paquetes y restricciones en memoria compartida.
 - **Solución**:
 - Se configuraron `network_mode: "host"` e `ipc: "host"` en `docker-compose.yml`, eliminando el puente virtual de red y permitiendo acceso de memoria compartida nativo en la Raspberry Pi 5.
+
+### 📝 Registro: [v0.6.0] - Creación de subproyecto desacoplado interface (Frontend React + Backend FastAPI Voice/Chat)
+- **date-time**: 2026-10-13 19:50:00
+- **Problema**:
+	- Se requiere crear un entorno completo desacoplado en `interface/` que disponga de una SPA en React con Vite, Tailwind y PNPM para chat y llamadas de voz en tiempo real, junto a un backend en Python (FastAPI) que gestione el WebSocket de audio bidireccional, VAD, síntesis TTS por fragmentos, transcripción STT y sirva los estáticos de `frontend/dist`. Además de `.env.example` y un `Dockerfile` autónomo.
+- **Causa**:
+	- Separar completamente la capa de interfaz de usuario y orquestación multimedia del proxy principal de Ollama, permitiendo que corra en su propio contenedor de forma independiente.
+- **Solución**:
+	- Se creó `interface/.env.example` con variables para `PORT`, `LLM_URL`, `TTS_URL`, `STT_URL` y timeouts.
+	- Se implementó `interface/backend` con `SentenceChunker` (para streaming fluido a Piper TTS), clientes para LLM/TTS/STT, endpoints REST (`/api/chat`, `/api/stt`, `/api/tts`), endpoint WebSocket `/ws/call` con VAD de 700ms y cancelación de audio (barge-in), y montaje de archivos estáticos de SPA en `main.py`.
+	- Se creó `interface/frontend` con React, TailwindCSS, Lucide, visualizador de audio, hook `useVoiceCall`, vista de llamada (`CallView`) y vista de chat (`ChatView`).
+	- Se creó `interface/Dockerfile` multi-stage (Node/PNPM builder y Python runtime).
+
+### 📝 Registro: [v0.6.1] - Integración de uv en Dockerfile y pyproject.toml de interface
+- **date-time**: 2026-10-13 19:51:40
+- **Problema**:
+	- Se requiere utilizar el gestor de paquetes de alto rendimiento `uv` para la instalación de dependencias en Python dentro del contenedor de `interface`.
+- **Causa**:
+	- Acelerar significativamente los tiempos de build del contenedor y estandarizar la resolución rápida de paquetes de Python sin sobrecarga de pip.
+- **Solución**:
+	- Se importó el binario oficial de `uv` (`ghcr.io/astral-sh/uv:latest`) en el `Dockerfile` de `interface`.
+	- Se configuró la instalación con `uv pip install --system --no-cache -r pyproject.toml`.
+	- Se añadieron `pydantic-settings` y `uvicorn[standard]` a `dependencies` en `interface/backend/pyproject.toml`.
+
+### 📝 Registro: [v0.6.2] - Adición de interface y caché compartida de uv en docker-compose.yml
+- **date-time**: 2026-10-13 19:57:00
+- **Problema**:
+	- Se requiere incorporar el servicio `interface` a `docker-compose.yml` y unificar el almacenamiento de descarga de paquetes de `uv` entre el host (RPi5) y todos los contenedores para evitar duplicación y saturación de disco.
+- **Causa**:
+	- Cada contenedor descargaría y almacenaría sus propias copias de ruedas/paquetes pip a menos que se comparta el directorio de caché de `uv`.
+- **Solución**:
+	- Se añadió el servicio `interface` a `docker-compose.yml` con contexto `./interface`, modo `network_mode: "host"` y soporte para variables de entorno de LLM, TTS, STT.
+	- Se mapeó el volumen del directorio de caché del host (`${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv`) tanto en `ollama-proxy` como en `interface`.
+	- Se configuró `--mount=type=cache,target=/root/.cache/uv` en el `Dockerfile` de `interface` para compartir la caché durante el build con BuildKit.
+
+### 📝 Registro: [v0.7.0] - Creación de microservicios de TTS (Piper) y STT (Vosk) en dockers/ e integración a docker-compose
+- **date-time**: 2026-10-13 20:03:00
+- **Problema**:
+	- Se requiere incorporar contenedores dedicados e independientes para TTS (Piper) y STT (Vosk) en `docker-compose.yml`, clarificando la orquestación del WebSocket y asegurando persistencia de modelos y caché compartida de `uv`.
+- **Causa**:
+	- Los contenedores oficiales de Piper y Vosk suelen requerir configuraciones dispares (Wyoming en Piper, Kaldi en Vosk) o consumos excesivos de RAM si no se ajusta el modelo a la RPi5. Además, el backend es el encargado de gestionar el WebSocket de la llamada del cliente, pero STT necesita aceptar tanto audio por POST como por WebSocket.
+- **Solución**:
+	- Se creó la carpeta `dockers/piper/` con `pyproject.toml`, `Dockerfile` y `main.py` (FastAPI en puerto 5000, soporte para voz `es_ES-sharvard-medium` y persistencia en `/app/modelos`).
+	- Se creó la carpeta `dockers/vosk/` con `pyproject.toml`, `Dockerfile` y `main.py` (FastAPI en puerto 2700, soporte HTTP `/asr` y WebSocket `/ws` para streaming continuo, modelo `vosk-model-small-es-0.42` optimizado para RPi5 y persistencia en `/app/modelos`).
+	- Se actualizaron en `docker-compose.yml` los servicios `piper-tts` y `vosk-stt` con `network_mode: "host"`, volúmenes de modelos locales (`./modelos/piper` y `./modelos/vosk`) y volumen de caché unificado de `uv` (`${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv`).
+
+### 📝 Registro: [v0.7.1] - Red Docker unificada y resolución DNS inter-contenedor
+- **date-time**: 2026-10-13 20:11:40
+- **Problema**:
+	- En despliegues multi-contenedor dentro de Docker Compose, el uso de IPs estáticas o localhost no escala ni funciona de forma fiable entre contenedores aislados. Se requiere que los contenedores se comuniquen directamente usando el nombre del contenedor como dominio DNS.
+- **Causa**:
+	- Con `network_mode: "host"` no se aprovecha el DNS interno de Docker para resolución de nombres de servicio.
+- **Solución**:
+	- Se migró `docker-compose.yml` a una red bridge compartida (`ollama-net`).
+	- Se configuraron los endpoints por defecto hacia los nombres de contenedor: `http://ollama-proxy:8000`, `http://piper-tts:5000` y `http://vosk-stt:2700`.
+	- Se actualizaron [interface/backend/config.py](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/config.py) e [interface/.env.example](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/.env.example).
+	- Se añadieron notas explicativas en la cabecera de `docker-compose.yml`.
+
+### 📝 Registro: [v0.7.2] - Botón y modal de configuración para selección independiente de TTS y STT (Navegador vs RPi5)
+- **date-time**: 2026-10-13 20:34:00
+- **Problema**:
+	- Se requiere disponer de un botón de configuración en la interfaz para poder alternar individualmente si el TTS y el STT se procesan en la Raspberry Pi 5 o en el navegador del usuario (para reducir consumo de CPU/RAM si fuera necesario).
+- **Causa**:
+	- Piper TTS y Vosk STT corriendo simultáneamente con el LLM en la RPi5 pueden saturar los núcleos de CPU en cargas concurrentes.
+- **Solución**:
+	- Se creó el componente `SettingsModal.jsx` con dos checkboxes independientes (uno para TTS y otro para STT), persistiendo la selección en `localStorage`.
+	- En `ChatView.jsx`: se integró `window.speechSynthesis` para TTS del navegador y `SpeechRecognition` para STT del navegador cuando están activados, manteniendo el fallback a `/api/tts` y `/api/stt` de la RPi5.
+	- En `useVoiceCall.js`: se añadió envío de modo de TTS (`tts_mode: "browser" | "rpi5"`) al WebSocket y reconocimiento directo en el navegador cuando se selecciona STT del navegador.
+	- En `routes/call_ws.py`: el backend omite la síntesis con Piper en llamadas si el cliente solicita `tts_mode: "browser"`, enviando las oraciones para que el navegador las sintetice.
