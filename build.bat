@@ -9,30 +9,40 @@ if "%TARGET_SVC%"=="" (
 	echo ============================================================
 	echo.
 	echo Selecciona el servicio a compilar:
-	echo   [1] Todos los servicios (proxy + interface + piper + vosk)
-	echo   [2] Solo interface (Web + FastAPI)
-	echo   [3] Solo piper-tts (TTS)
-	echo   [4] Solo vosk-stt (STT)
-	echo   [5] Solo ollama-proxy (Core LLM Proxy)
+	echo   [*] Todos los servicios (proxy + interface + piper + vosk)
+	echo   [i] Solo interface (Web + FastAPI)
+	echo   [p] Solo piper-tts (TTS)
+	echo   [v] Solo vosk-stt (STT)
+	echo   [o] Solo ollama-proxy (Core LLM Proxy)
 	echo.
-	set /p OPCION="Opcion [1-5]: "
+	set /p OPCION="Opcion [*, i, p, v, o]: "
+	if "!OPCION!"=="*" set TARGET_SVC=all
 	if "!OPCION!"=="1" set TARGET_SVC=all
+	if /i "!OPCION!"=="i" set TARGET_SVC=interface
 	if "!OPCION!"=="2" set TARGET_SVC=interface
+	if /i "!OPCION!"=="p" set TARGET_SVC=piper-tts
 	if "!OPCION!"=="3" set TARGET_SVC=piper-tts
+	if /i "!OPCION!"=="v" set TARGET_SVC=vosk-stt
 	if "!OPCION!"=="4" set TARGET_SVC=vosk-stt
+	if /i "!OPCION!"=="o" set TARGET_SVC=ollama-proxy
 	if "!OPCION!"=="5" set TARGET_SVC=ollama-proxy
 )
 
 if "%TARGET_SVC%"=="" set TARGET_SVC=all
+if "%TARGET_SVC%"=="*" set TARGET_SVC=all
 
-if "%TARGET_SVC%"=="all" goto build_all
-if "%TARGET_SVC%"=="interface" goto build_interface
-if "%TARGET_SVC%"=="piper" set TARGET_SVC=piper-tts
-if "%TARGET_SVC%"=="piper-tts" goto build_piper
-if "%TARGET_SVC%"=="vosk" set TARGET_SVC=vosk-stt
-if "%TARGET_SVC%"=="vosk-stt" goto build_vosk
-if "%TARGET_SVC%"=="proxy" set TARGET_SVC=ollama-proxy
-if "%TARGET_SVC%"=="ollama-proxy" goto build_proxy
+if /i "%TARGET_SVC%"=="all" goto build_all
+if /i "%TARGET_SVC%"=="i" goto build_interface
+if /i "%TARGET_SVC%"=="interface" goto build_interface
+if /i "%TARGET_SVC%"=="p" set TARGET_SVC=piper-tts
+if /i "%TARGET_SVC%"=="piper" set TARGET_SVC=piper-tts
+if /i "%TARGET_SVC%"=="piper-tts" goto build_piper
+if /i "%TARGET_SVC%"=="v" set TARGET_SVC=vosk-stt
+if /i "%TARGET_SVC%"=="vosk" set TARGET_SVC=vosk-stt
+if /i "%TARGET_SVC%"=="vosk-stt" goto build_vosk
+if /i "%TARGET_SVC%"=="o" set TARGET_SVC=ollama-proxy
+if /i "%TARGET_SVC%"=="proxy" set TARGET_SVC=ollama-proxy
+if /i "%TARGET_SVC%"=="ollama-proxy" goto build_proxy
 
 echo [ERROR] Servicio desconocido: %TARGET_SVC%
 exit /b 1

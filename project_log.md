@@ -375,3 +375,22 @@
 - **Solución**:
 	- Se creo `build.bat` para compilar localmente en Windows (`linux/arm64`) sin conexion SSH.
 	- Se creo `send.bat` para transmitir por canal SSH directo (`docker save | ssh docker load`), transmitiendo en stream puro sin compresión gzip y sin crear archivos temporales en el sistema de archivos del RPi5.
+
+### 📝 Registro: [v0.7.12] - Bloqueo definitivo de build y pull en docker-compose.yml
+- **date-time**: 2026-10-14 01:49:00
+- **Problema**:
+	- Al ejecutar `docker compose up -d interface` en la Raspberry Pi, Docker Compose intentaba hacer pull de `interface:latest` y, al no encontrarla en Docker Hub, procedia a compilar (`build`) el contenedor desde cero en la RPi5.
+- **Causa**:
+	- `docker-compose.yml` contenia directivas `build:` para cada servicio y no tenia definida una politica estricta de pull, haciendo que Compose intente descargar o compilar siempre.
+- **Solución**:
+	- Se eliminaron completamente todas las secciones `build:` de [docker-compose.yml](file:///c:/work/person/hassan/Repos/ollama-proxy/docker-compose.yml).
+	- Se configuro `pull_policy: never` en todos los servicios (`ollama-proxy`, `interface`, `piper-tts`, `vosk-stt`), imposibilitando que Docker intente descargar de internet o compilar localmente en la RPi5.
+
+### 📝 Registro: [v0.7.13] - Actualizacion de seleccion nemotecnica en build.bat y send.bat
+- **date-time**: 2026-10-14 01:54:00
+- **Problema**:
+	- La seleccion numerica del 1 al 5 en los scripts de construccion y envio resultaba confusa para identificar los servicios.
+- **Causa**:
+	- Se utilizaban indices numericos sin asociacion directa a las iniciales de los contenedores.
+- **Solución**:
+	- Se modificaron [build.bat](file:///c:/work/person/hassan/Repos/ollama-proxy/build.bat) y [send.bat](file:///c:/work/person/hassan/Repos/ollama-proxy/send.bat) para utilizar `*` para todos los servicios e iniciales claras: `i` (interface), `p` (piper-tts), `v` (vosk-stt) y `o` (ollama-proxy), manteniendo compatibilidad retroactiva.

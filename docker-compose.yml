@@ -14,8 +14,9 @@
 
 services:
   ollama-proxy:
-    build: .
+    # build: .
     image: ollama-proxy:latest
+    pull_policy: never
     container_name: ollama-proxy
     command: uv run --no-sync uvicorn main:app --host 0.0.0.0 --port 8000
     ipc: "host"
@@ -32,10 +33,11 @@ services:
     restart: unless-stopped
 
   interface:
-    build:
-      context: ./interface
-      dockerfile: Dockerfile
+    # build:
+    #   context: ./interface
+    #   dockerfile: Dockerfile
     image: interface:latest
+    pull_policy: never
     container_name: interface
     networks:
       - ollama-net
@@ -59,10 +61,11 @@ services:
     restart: unless-stopped
 
   piper-tts:
-    build:
-      context: ./dockers/piper
-      dockerfile: Dockerfile
+    # build:
+    #   context: ./dockers/piper
+    #   dockerfile: Dockerfile
     image: piper-tts:latest
+    pull_policy: never
     container_name: piper-tts
     networks:
       - ollama-net
@@ -78,10 +81,11 @@ services:
     restart: unless-stopped
 
   vosk-stt:
-    build:
-      context: ./dockers/vosk
-      dockerfile: Dockerfile
+    # build:
+    #   context: ./dockers/vosk
+    #   dockerfile: Dockerfile
     image: vosk-stt:latest
+    pull_policy: never
     container_name: vosk-stt
     networks:
       - ollama-net
