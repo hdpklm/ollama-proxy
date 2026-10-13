@@ -345,3 +345,33 @@
 - **Solución**:
 	- Se actualizaron todos los scripts `.bat` (`build-interface`, `build-piper`, `build-vosk`, `build-proxy`, `build-n-send`) para sincronizar automáticamente `docker-compose.yml` con la RPi5 mediante `scp`.
 	- Se documentó el comando de arranque con el flag `--no-build` (`docker compose up -d --no-build`) para impedir cualquier compilación accidental en la RPi5.
+
+### 📝 Registro: [v0.7.9] - Corrección de 502 Bad Gateway: Integración con /v1/chat/completions y autenticación Bearer
+- **date-time**: 2026-10-14 00:14:00
+- **Problema**:
+	- Al enviar un mensaje en el chat web (`POST /api/chat`), la interfaz devolvía un error `502 Bad Gateway: LLM proxy error` al usuario.
+- **Causa**:
+	- `llm_client.py` intentaba enviar peticiones a `/api/chat` en lugar del endpoint oficial expuesto por `ollama-proxy`, que es `/v1/chat/completions` (formato OpenAI estándar). Además, no propagaba la clave de autenticación requerida `PROXY_API_KEY` (`Bearer cambia_esta_clave`).
+- **Solución**:
+	- En `interface/backend/services/llm_client.py`: se implementó el protocolo estándar OpenAI `/v1/chat/completions` con soporte tanto para respuestas directas como para streaming SSE (`data: ...`), con fallback a `/api/chat`.
+	- En `interface/backend/config.py`: se resolvió `API_KEY` utilizando por defecto `PROXY_API_KEY` y `LLM_API_KEY`.
+	- En `docker-compose.yml`: se inyectaron `API_KEY` y `PROXY_API_KEY` a las variables de entorno del contenedor `interface`.
+
+### 📝 Registro: [v0.7.10] - Correccion de uv sync en Dockerfiles de Vosk y Piper
+- **date-time**: 2026-10-14 00:21:00
+- **Problema**:
+	- El build de Docker para `vosk-stt` fallaba con error de resolucion de dependencias: `Because all versions of srt have no usable wheels and vosk>=0.3.45 depends on srt... hint: Wheels are required for srt because building from source is forbidden for all packages (i.e., with --no-build)`.
+- **Causa**:
+	- El flag `--no-build` en `uv sync` prohibia a `uv` desempaquetar y construir distribuciones de codigo fuente puro (sdist `.tar.gz`) como el paquete `srt` requerido por `vosk`.
+- **Solución**:
+	- Se elimino el flag `--no-build` de `dockers/vosk/Dockerfile`, `dockers/piper/Dockerfile` e `interface/Dockerfile`, permitiendo que `uv sync --no-install-project --no-dev` instale dependencias sdist de forma instantanea sin requerir herramientas de compilacion C/C++.
+
+### 📝 Registro: [v0.7.11] - Separacion de scripts en build.bat y send.bat sin compresion ni temporales
+- **date-time**: 2026-10-14 00:42:00
+- **Problema**:
+	- Se requeria separar el ciclo de creacion de contenedores del de transferencia a la RPi5, eliminando cualquier guardado en archivos temporales o pasos de compresion/descompresion para evitar saturar la velocidad de escritura en disco del RPi5.
+- **Causa**:
+	- Los scripts previos compilaban y transferian en un solo bloque. Si la conexion o el destino fallaban, habia que recomenzar, y los metodos basados en empaquetado a disco intermedio generan doble escritura innecesaria en la tarjeta del RPi5.
+- **Solución**:
+	- Se creo `build.bat` para compilar localmente en Windows (`linux/arm64`) sin conexion SSH.
+	- Se creo `send.bat` para transmitir por canal SSH directo (`docker save | ssh docker load`), transmitiendo en stream puro sin compresión gzip y sin crear archivos temporales en el sistema de archivos del RPi5.

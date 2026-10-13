@@ -51,6 +51,8 @@ services:
       - LLM_URL=http://ollama-proxy:8000
       - TTS_URL=http://piper-tts:5000
       - STT_URL=http://vosk-stt:2700
+      - API_KEY=${PROXY_API_KEY:-cambia_esta_clave}
+      - PROXY_API_KEY=${PROXY_API_KEY:-cambia_esta_clave}
       - UV_CACHE_DIR=/root/.cache/uv
     volumes:
       - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv

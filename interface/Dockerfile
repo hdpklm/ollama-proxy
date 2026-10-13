@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY backend/pyproject.toml backend/uv.loc[k] ./
-RUN uv sync --no-install-project --no-dev --no-build
+RUN uv sync --no-install-project --no-dev
 
 COPY backend/ ./
 COPY frontend/dist /app/frontend/dist
