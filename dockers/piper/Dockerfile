@@ -1,6 +1,10 @@
 FROM python:3.11-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+ENV UV_COMPILE_BYTECODE=false \
+	UV_LINK_MODE=copy \
+	PYTHONDONTWRITEBYTECODE=1
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -8,11 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	ca-certificates \
 	&& rm -rf /var/lib/apt/lists/*
 
-ENV UV_CACHE_DIR=/root/.cache/uv
-
-COPY pyproject.toml ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-	uv pip install --system -r pyproject.toml
+COPY pyproject.toml uv.loc[k] ./
+RUN uv sync --no-install-project --no-dev --no-build
 
 COPY main.py ./
 
@@ -22,4 +23,4 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 5000
 
-CMD ["python", "main.py"]
+CMD ["uv", "run", "--no-sync", "python", "main.py"]

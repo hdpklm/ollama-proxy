@@ -1,4 +1,4 @@
-# Project Status - Ollama Priority Proxy v0.7.2
+# Project Status - Ollama Priority Proxy v0.7.8
 
 ## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Interface Voice/Chat Module + Standalone TTS/STT Services
 Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, modulo desacoplado de interfaz web (React + Vite + Tailwind), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS) y microservicios independientes para Piper TTS y Vosk STT.

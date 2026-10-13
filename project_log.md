@@ -281,3 +281,67 @@
 	- En `ChatView.jsx`: se integró `window.speechSynthesis` para TTS del navegador y `SpeechRecognition` para STT del navegador cuando están activados, manteniendo el fallback a `/api/tts` y `/api/stt` de la RPi5.
 	- En `useVoiceCall.js`: se añadió envío de modo de TTS (`tts_mode: "browser" | "rpi5"`) al WebSocket y reconocimiento directo en el navegador cuando se selecciona STT del navegador.
 	- En `routes/call_ws.py`: el backend omite la síntesis con Piper en llamadas si el cliente solicita `tts_mode: "browser"`, enviando las oraciones para que el navegador las sintetice.
+
+### 📝 Registro: [v0.7.3] - Etiquetas de imagen explícitas en docker-compose y script build-n-send.bat
+- **date-time**: 2026-10-13 22:06:00
+- **Problema**:
+	- Se requiere que las imágenes Docker se compilen en el PC del usuario (para la arquitectura ARM64 de la RPi5) y se transfieran directamente por red/SSH a la Raspberry Pi 5 para evitar sobrecargar la RPi5 con compilaciones lentas.
+- **Causa**:
+	- Docker Compose en la RPi5 intentaba compilar en paralelo sin nombres de imagen explícitos vinculados a `docker load`.
+- **Solución**:
+	- Se asignaron nombres de imagen explícitos en `docker-compose.yml` (`image: ollama-proxy:latest`, `image: interface:latest`, `image: piper-tts:latest`, `image: vosk-stt:latest`).
+	- Se creó `build-n-send.bat` que automatiza la compilación con `docker buildx build --platform linux/arm64` y el envío directo mediante `docker save | ssh user@ip "docker load"`, indicando al finalizar que solo resta ejecutar `docker compose up -d` en la RPi5.
+
+### 📝 Registro: [v0.7.4] - Corrección de pnpm onlyBuiltDependencies en interface y control de flujo en build-n-send
+- **date-time**: 2026-10-13 22:12:00
+- **Problema**:
+	- Durante la ejecución de `build-n-send.bat`, la compilación de `interface:latest` falló con `ERR_PNPM_IGNORED_BUILDS` al intentar ejecutar los scripts de compilación de `esbuild`.
+- **Causa**:
+	- Las versiones recientes de pnpm bloquean por defecto los scripts de postinstalación (`build scripts`) a menos que estén explícitamente autorizados en `package.json` bajo `pnpm.onlyBuiltDependencies`. Además, en `build-n-send.bat` no se comprobaba el errorlevel tras cada llamada en el bucle `:build_all`.
+- **Solución**:
+	- Se añadió `"pnpm": { "onlyBuiltDependencies": ["esbuild"] }` en [interface/frontend/package.json](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/package.json).
+	- Se fijó la versión estable de pnpm en `pnpm@9.15.4` en [interface/Dockerfile](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/Dockerfile).
+	- Se añadió verificación de `errorlevel` en [build-n-send.bat](file:///c:/work/person/hassan/Repos/ollama-proxy/build-n-send.bat) para abortar inmediatamente si alguna imagen falla.
+
+### 📝 Registro: [v0.7.5] - Scripts de compilación individuales por servicio y corrección de workspace pnpm
+- **date-time**: 2026-10-13 23:18:00
+- **Problema**:
+	- `pnpm run build` fallaba en `interface:latest` con `ERROR packages field missing or empty` debido a la presencia accidental de un archivo `pnpm-workspace.yaml`. Además, si un contenedor fallaba en `build-n-send.bat`, el usuario tenía que reiniciar todo el proceso.
+- **Causa**:
+	- `pnpm-workspace.yaml` hacía creer a pnpm que se trataba de un monorepo sin paquetes definidos. Falta de scripts independientes para compilar cada microservicio por separado.
+- **Solución**:
+	- Se eliminó `pnpm-workspace.yaml` y se creó `interface/.dockerignore` para omitir `node_modules` y `dist` locales.
+	- Se crearon scripts independientes: `build-interface.bat`, `build-piper.bat`, `build-vosk.bat` y `build-proxy.bat`.
+	- Se actualizó `build-n-send.bat` con menú interactivo para compilar todos o un servicio individual.
+
+### 📝 Registro: [v0.7.6] - Migración a uv sync --no-build y uso de frontend/dist precompilado
+- **date-time**: 2026-10-13 23:25:00
+- **Problema**:
+	- Se requiere que Docker no compile nada desde cero: ni el frontend con Node/pnpm (debe reutilizar el `dist/` precompilado) ni librerías Python desde código fuente (`--no-build`), y unificar el uso de `uv sync` en lugar de `uv pip`.
+- **Causa**:
+	- El Dockerfile de `interface` utilizaba una etapa previa con Node y pnpm que intentaba compilar el frontend. Además, `dockers/piper` y `dockers/vosk` usaban `uv pip` en vez del flujo estándar `uv sync`.
+- **Solución**:
+	- Se simplificó `interface/Dockerfile`: se eliminó Node/pnpm y ahora copia directamente la carpeta precompilada `frontend/dist/`.
+	- Se configuraron `interface`, `piper` y `vosk` con `RUN uv sync --no-install-project --no-dev --no-build` para descargar exclusivamente ruedas (`wheels`) binarias precompiladas sin compilar código fuente.
+	- Se actualizó el comando de inicio en todos los contenedores a `uv run --no-sync python main.py`.
+
+### 📝 Registro: [v0.7.7] - Exclusión estricta de frontend/src, desactivación de bytecode y aislamiento de librerías
+- **date-time**: 2026-10-13 23:32:00
+- **Problema**:
+	- Se requiere que las imágenes no compilen nada adentro, que no incluyan código fuente innecesario de frontend (`src/`), que utilicen solo `dist/` precompilado, que no generen bytecode `.pyc` superfluo en disco, y que cada contenedor mantenga sus librerías aisladas sin compartir entornos.
+- **Causa**:
+	- `interface/.dockerignore` requería ignorar explícitamente `frontend/src` y permitir `frontend/dist`. Además, los archivos `.pyc` entre Windows x64 y Linux ARM64 difieren en bytecode magic number, por lo que se debe usar `PYTHONDONTWRITEBYTECODE=1`.
+- **Solución**:
+	- Se actualizó `interface/.dockerignore` ignorando `frontend/src`, `node_modules` y `.vite`, permitiendo únicamente `frontend/dist`.
+	- Se agregó `ENV PYTHONDONTWRITEBYTECODE=1` a los Dockerfiles de `interface`, `dockers/piper` y `dockers/vosk`.
+	- Se mantienen entornos virtuales aislados por contenedor con instalación exclusiva de wheels precompiladas (`--no-build`).
+
+### 📝 Registro: [v0.7.8] - Sincronización automática de docker-compose.yml y uso de flag --no-build en RPi5
+- **date-time**: 2026-10-14 00:01:00
+- **Problema**:
+	- En la RPi5, tras cargar exitosamente la imagen `interface:latest`, la ejecución de `docker compose up -d interface` intentó compilar la imagen desde cero descargando Node.js.
+- **Causa**:
+	- La RPi5 aún tenía el archivo `docker-compose.yml` antiguo sin la etiqueta explícita `image: interface:latest`. Por defecto, Docker Compose buscaba `ollama-proxy-interface:latest`, y al no coincidir el nombre, intentó compilar.
+- **Solución**:
+	- Se actualizaron todos los scripts `.bat` (`build-interface`, `build-piper`, `build-vosk`, `build-proxy`, `build-n-send`) para sincronizar automáticamente `docker-compose.yml` con la RPi5 mediante `scp`.
+	- Se documentó el comando de arranque con el flag `--no-build` (`docker compose up -d --no-build`) para impedir cualquier compilación accidental en la RPi5.
