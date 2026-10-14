@@ -426,3 +426,13 @@
 	- El binario compartido `libvosk.so` en arquitectura ARM64 requiere la biblioteca atomica del sistema GNU (`libatomic.so.1`), que no viene por defecto en la imagen base `python:3.11-slim`.
 - **Solución**:
 	- Se anadio el paquete `libatomic1` a los Dockerfiles de [dockers/vosk/Dockerfile](file:///c:/work/person/hassan/Repos/ollama-proxy/dockers/vosk/Dockerfile) y [dockers/piper/Dockerfile](file:///c:/work/person/hassan/Repos/ollama-proxy/dockers/piper/Dockerfile).
+
+### 📝 Registro: [v0.7.17] - Soporte multi-contenedor por comas y eliminacion de scp docker-compose en send.bat
+- **date-time**: 2026-10-14 02:59:00
+- **Problema**:
+	- Se necesitaba poder compilar y enviar múltiples contenedores a la vez indicándolos separados por comas (ej. `v,p`), y eliminar la copia automática de `docker-compose.yml` que ya gestiona manualmente el usuario.
+- **Causa**:
+	- Los scripts solo aceptaban una única opción atómica y siempre ejecutaban `scp docker-compose.yml` al finalizar.
+- **Solución**:
+	- Se actualizaron [send.bat](file:///c:/work/person/hassan/Repos/ollama-proxy/send.bat) y [build.bat](file:///c:/work/person/hassan/Repos/ollama-proxy/build.bat) con un bucle de despacho que procesa listas separadas por comas o espacios (ej. `v,p` o `i,v,p`).
+	- Se removió por completo la sincronización forzada de `docker-compose.yml` de `send.bat`.

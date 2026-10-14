@@ -8,44 +8,34 @@ if "%TARGET_SVC%"=="" (
 	echo   COMPILACION ARM64 LOCAL EN PC (SIN ENVIO)
 	echo ============================================================
 	echo.
-	echo Selecciona el servicio a compilar:
+	echo Selecciona el servicio a compilar (puedes separar por comas, ej: v,p):
 	echo   [*] Todos los servicios (proxy + interface + piper + vosk)
 	echo   [i] Solo interface (Web + FastAPI)
 	echo   [p] Solo piper-tts (TTS)
 	echo   [v] Solo vosk-stt (STT)
 	echo   [o] Solo ollama-proxy (Core LLM Proxy)
 	echo.
-	set /p OPCION="Opcion [*, i, p, v, o]: "
+	set /p OPCION="Opcion [*, i, p, v, o o separados por comas]: "
+	if "!OPCION!"=="" set TARGET_SVC=all
 	if "!OPCION!"=="*" set TARGET_SVC=all
 	if "!OPCION!"=="1" set TARGET_SVC=all
-	if /i "!OPCION!"=="i" set TARGET_SVC=interface
-	if "!OPCION!"=="2" set TARGET_SVC=interface
-	if /i "!OPCION!"=="p" set TARGET_SVC=piper-tts
-	if "!OPCION!"=="3" set TARGET_SVC=piper-tts
-	if /i "!OPCION!"=="v" set TARGET_SVC=vosk-stt
-	if "!OPCION!"=="4" set TARGET_SVC=vosk-stt
-	if /i "!OPCION!"=="o" set TARGET_SVC=ollama-proxy
-	if "!OPCION!"=="5" set TARGET_SVC=ollama-proxy
+	if not defined TARGET_SVC set TARGET_SVC=!OPCION!
 )
 
 if "%TARGET_SVC%"=="" set TARGET_SVC=all
-if "%TARGET_SVC%"=="*" set TARGET_SVC=all
-
+if "%TARGET_SVC%"=="*" goto build_all
 if /i "%TARGET_SVC%"=="all" goto build_all
-if /i "%TARGET_SVC%"=="i" goto build_interface
-if /i "%TARGET_SVC%"=="interface" goto build_interface
-if /i "%TARGET_SVC%"=="p" set TARGET_SVC=piper-tts
-if /i "%TARGET_SVC%"=="piper" set TARGET_SVC=piper-tts
-if /i "%TARGET_SVC%"=="piper-tts" goto build_piper
-if /i "%TARGET_SVC%"=="v" set TARGET_SVC=vosk-stt
-if /i "%TARGET_SVC%"=="vosk" set TARGET_SVC=vosk-stt
-if /i "%TARGET_SVC%"=="vosk-stt" goto build_vosk
-if /i "%TARGET_SVC%"=="o" set TARGET_SVC=ollama-proxy
-if /i "%TARGET_SVC%"=="proxy" set TARGET_SVC=ollama-proxy
-if /i "%TARGET_SVC%"=="ollama-proxy" goto build_proxy
 
-echo [ERROR] Servicio desconocido: %TARGET_SVC%
-exit /b 1
+set "ITEMS=%TARGET_SVC:,= %"
+
+for %%I in (%ITEMS%) do (
+	call :dispatch_build "%%~I"
+	if errorlevel 1 (
+		pause
+		exit /b 1
+	)
+)
+goto finished
 
 :build_all
 call :build_image "ollama-proxy:latest" "."
@@ -58,21 +48,57 @@ call :build_image "vosk-stt:latest" "./dockers/vosk"
 if errorlevel 1 exit /b 1
 goto finished
 
-:build_interface
-call :build_image "interface:latest" "./interface"
-goto finished
+:dispatch_build
+set "ITEM=%~1"
+if "%ITEM%"=="*" goto build_all
+if /i "%ITEM%"=="all" goto build_all
+if /i "%ITEM%"=="i" (
+	call :build_image "interface:latest" "./interface"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="interface" (
+	call :build_image "interface:latest" "./interface"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="p" (
+	call :build_image "piper-tts:latest" "./dockers/piper"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="piper" (
+	call :build_image "piper-tts:latest" "./dockers/piper"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="piper-tts" (
+	call :build_image "piper-tts:latest" "./dockers/piper"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="v" (
+	call :build_image "vosk-stt:latest" "./dockers/vosk"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="vosk" (
+	call :build_image "vosk-stt:latest" "./dockers/vosk"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="vosk-stt" (
+	call :build_image "vosk-stt:latest" "./dockers/vosk"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="o" (
+	call :build_image "ollama-proxy:latest" "."
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="proxy" (
+	call :build_image "ollama-proxy:latest" "."
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="ollama-proxy" (
+	call :build_image "ollama-proxy:latest" "."
+	exit /b %errorlevel%
+)
 
-:build_piper
-call :build_image "piper-tts:latest" "./dockers/piper"
-goto finished
-
-:build_vosk
-call :build_image "vosk-stt:latest" "./dockers/vosk"
-goto finished
-
-:build_proxy
-call :build_image "ollama-proxy:latest" "."
-goto finished
+echo [ERROR] Servicio desconocido: %ITEM%
+exit /b 1
 
 :build_image
 set IMG_NAME=%~1
@@ -95,6 +121,6 @@ echo.
 echo ============================================================
 echo   COMPILACION LOCAL ARM64 FINALIZADA
 echo ============================================================
-echo Puedes transferir la imagen a la RPi5 con: send.bat %TARGET_SVC%
+echo Puedes transferir las imagenes a la RPi5 con: send.bat %TARGET_SVC%
 echo.
 pause
