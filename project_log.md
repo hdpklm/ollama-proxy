@@ -450,3 +450,13 @@
 	- Se traslado la peticion de microfono antes de la conexion WebSocket para validar permisos y contextos HTTP/HTTPS de forma interactiva.
 	- Se anadio soporte explicito de desconexion y trazabilidad detallada de logs tanto en el backend (`call_ws.py`) como en el hook (`useVoiceCall.js`).
 	- Se compilo el nuevo bundle frontend en `interface/frontend/dist`.
+
+### 📝 Registro: [v0.7.19] - Resolucion de ReferenceError TDZ en useVoiceCall.js
+- **date-time**: 2026-10-14 13:19:00
+- **Problema**:
+	- La aplicacion web arrojaba un error en la consola del navegador al intentar montar el componente de llamada: `ReferenceError: Cannot access 'A' before initialization`.
+- **Causa**:
+	- `startCall` incluia a `endCall` en su array de dependencias (`useCallback`), pero `endCall` estaba declarado debajo de `startCall` en el codigo fuente. En JavaScript (`const`), esto provoca un error de Temporal Dead Zone (TDZ).
+- **Solución**:
+	- Se reordeno la declaracion en [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js), definiendo `endCall` antes de `startCall`.
+	- Se reconstruyo el bundle de produccion en `interface/frontend/dist`.

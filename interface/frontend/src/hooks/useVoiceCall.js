@@ -95,6 +95,48 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 		}
 	}, [stopCurrentAudioPlayback])
 
+	const endCall = useCallback(() => {
+		stopCurrentAudioPlayback()
+
+		if (speechRecRef.current) {
+			try {
+				speechRecRef.current.stop()
+			} catch (e) {}
+			speechRecRef.current = null
+		}
+
+		if (micStreamRef.current) {
+			micStreamRef.current.getTracks().forEach((track) => track.stop())
+			micStreamRef.current = null
+		}
+
+		if (processorRef.current) {
+			try {
+				processorRef.current.disconnect()
+			} catch (e) {}
+			processorRef.current = null
+		}
+
+		if (audioContextRef.current) {
+			try {
+				audioContextRef.current.close()
+			} catch (e) {}
+			audioContextRef.current = null
+		}
+
+		if (wsRef.current) {
+			try {
+				wsRef.current.close()
+			} catch (e) {}
+			wsRef.current = null
+		}
+
+		setIsInCall(false)
+		setStatus("disconnected")
+		setUserTranscript("")
+		setAssistantText("")
+	}, [stopCurrentAudioPlayback])
+
 	const startCall = useCallback(async () => {
 		try {
 			setStatus("connecting")
@@ -252,48 +294,6 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 			endCall()
 		}
 	}, [endCall, enqueueAudioChunk, isMuted, settings])
-
-	const endCall = useCallback(() => {
-		stopCurrentAudioPlayback()
-
-		if (speechRecRef.current) {
-			try {
-				speechRecRef.current.stop()
-			} catch (e) {}
-			speechRecRef.current = null
-		}
-
-		if (micStreamRef.current) {
-			micStreamRef.current.getTracks().forEach((track) => track.stop())
-			micStreamRef.current = null
-		}
-
-		if (processorRef.current) {
-			try {
-				processorRef.current.disconnect()
-			} catch (e) {}
-			processorRef.current = null
-		}
-
-		if (audioContextRef.current) {
-			try {
-				audioContextRef.current.close()
-			} catch (e) {}
-			audioContextRef.current = null
-		}
-
-		if (wsRef.current) {
-			try {
-				wsRef.current.close()
-			} catch (e) {}
-			wsRef.current = null
-		}
-
-		setIsInCall(false)
-		setStatus("disconnected")
-		setUserTranscript("")
-		setAssistantText("")
-	}, [stopCurrentAudioPlayback])
 
 	const toggleMute = useCallback(() => {
 		setIsMuted((prev) => !prev)
