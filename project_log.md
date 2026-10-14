@@ -417,3 +417,12 @@
 	- Se actualizaron los metadatos de [index.html](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/index.html) y el registro en [main.jsx](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/main.jsx).
 	- Se anadio detector de `beforeinstallprompt` y boton interactivo "Instalar" en la cabecera de [App.jsx](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/App.jsx).
 	- Se reconstruyo el bundle de produccion en `interface/frontend/dist`.
+
+### 📝 Registro: [v0.7.16] - Inclusion de libatomic1 en Dockerfile de Vosk y Piper
+- **date-time**: 2026-10-14 02:50:00
+- **Problema**:
+	- El contenedor `vosk-stt` fallaba en Raspberry Pi al arrancar: `OSError: cannot load library '/app/.venv/lib/python3.11/site-packages/vosk/libvosk.so': libatomic.so.1: cannot open shared object file: No such file or directory`.
+- **Causa**:
+	- El binario compartido `libvosk.so` en arquitectura ARM64 requiere la biblioteca atomica del sistema GNU (`libatomic.so.1`), que no viene por defecto en la imagen base `python:3.11-slim`.
+- **Solución**:
+	- Se anadio el paquete `libatomic1` a los Dockerfiles de [dockers/vosk/Dockerfile](file:///c:/work/person/hassan/Repos/ollama-proxy/dockers/vosk/Dockerfile) y [dockers/piper/Dockerfile](file:///c:/work/person/hassan/Repos/ollama-proxy/dockers/piper/Dockerfile).
