@@ -470,3 +470,17 @@
 - **Solución**:
 	- En [dockers/piper/main.py](file:///c:/work/person/hassan/Repos/ollama-proxy/dockers/piper/main.py), se preconfiguraron explicitamente los parametros `setnchannels(1)`, `setsampwidth(2)` y `setframerate(sample_rate)` antes de invocar `voice.synthesize`.
 	- Se anadio la funcion `create_empty_wav` para retornar cabeceras WAV validas de forma inmediata si el texto no contiene caracteres alfanumericos.
+
+### 📝 Registro: [v0.7.21] - Consumo de chunks en generador de sintesis de Piper TTS para emision de audio PCM
+- **date-time**: 2026-10-14 14:05:00
+- **Problema**:
+	- Piper TTS retornaba una respuesta HTTP 200 con binario WAV sin arrojar excepciones, pero no se escuchaba voz ni audio en el cliente (silencio absoluto).
+- **Causa**:
+	- En la API de Piper TTS (`piper-tts` / `piper1-gpl`), el método `voice.synthesize(text)` es una función generadora que retorna un iterable de objetos `AudioChunk` conteniendo `audio_int16_bytes`.
+	- Al invocar `voice.synthesize(text, wav_file)` como llamada ordinaria sin iterar sobre el generador retornado, la función nunca ejecutaba el ciclo de inferencia y no escribía ningún bloque PCM en el archivo WAV. En consecuencia, el archivo generado solo contenía la cabecera RIFF de 44 bytes con 0 frames de datos de audio (duración 0.0 segundos).
+- **Solución**:
+	- En [dockers/piper/main.py](file:///c:/work/person/hassan/Repos/ollama-proxy/dockers/piper/main.py), se reestructuró `synthesize_text_to_wav` implementando un esquema multi-estrategia resiliente:
+		1. Itera activamente sobre el generador `voice.synthesize(text)`, extrayendo `chunk.audio_int16_bytes` y escribiéndolos en `wav_file.writeframes()`.
+		2. Soporte fallback a `voice.synthesize_stream_raw(text)` para variantes que devuelven directamente bloques de bytes PCM crudos.
+		3. Soporte fallback para variantes legacy con `voice.synthesize_wav(text, wav_file)`.
+	- Con esto, el WAV devuelto contiene la totalidad de los datos PCM sintetizados, permitiendo una reproducción nítida e instantánea en el navegador o dispositivo móvil.

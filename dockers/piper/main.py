@@ -72,7 +72,54 @@ def synthesize_text_to_wav(text: str) -> bytes:
 		wav_file.setnchannels(1)
 		wav_file.setsampwidth(2)
 		wav_file.setframerate(sample_rate)
-		voice.synthesize(text, wav_file)
+
+		written = False
+
+		try:
+			result = voice.synthesize(text)
+			if hasattr(result, "__iter__"):
+				for chunk in result:
+					if hasattr(chunk, "audio_int16_bytes") and chunk.audio_int16_bytes:
+						wav_file.writeframes(chunk.audio_int16_bytes)
+						written = True
+					elif isinstance(chunk, (bytes, bytearray)) and chunk:
+						wav_file.writeframes(chunk)
+						written = True
+					elif hasattr(chunk, "tobytes"):
+						wav_file.writeframes(chunk.tobytes())
+						written = True
+		except TypeError:
+			pass
+
+		if not written and hasattr(voice, "synthesize_stream_raw"):
+			try:
+				for audio_bytes in voice.synthesize_stream_raw(text):
+					if audio_bytes:
+						wav_file.writeframes(audio_bytes)
+						written = True
+			except Exception:
+				pass
+
+		if not written and hasattr(voice, "synthesize_wav"):
+			try:
+				voice.synthesize_wav(text, wav_file)
+				written = True
+			except Exception:
+				pass
+
+		if not written and hasattr(voice, "synthesize"):
+			try:
+				ret = voice.synthesize(text, wav_file)
+				if hasattr(ret, "__iter__"):
+					for chunk in ret:
+						if hasattr(chunk, "audio_int16_bytes") and chunk.audio_int16_bytes:
+							wav_file.writeframes(chunk.audio_int16_bytes)
+							written = True
+						elif isinstance(chunk, (bytes, bytearray)) and chunk:
+							wav_file.writeframes(chunk)
+							written = True
+			except Exception:
+				pass
 	return buffer.getvalue()
 
 @app.post("/")
