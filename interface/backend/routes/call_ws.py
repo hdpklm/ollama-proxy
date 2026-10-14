@@ -153,6 +153,11 @@ async def websocket_call_endpoint(websocket: WebSocket):
 	try:
 		while True:
 			message = await websocket.receive()
+			msg_type_raw = message.get("type")
+			if msg_type_raw == "websocket.disconnect":
+				print("[WS Call] Client sent disconnect message")
+				break
+
 			if "bytes" in message and message["bytes"]:
 				data = message["bytes"]
 				audio_buffer.extend(data)
@@ -180,6 +185,7 @@ async def websocket_call_endpoint(websocket: WebSocket):
 
 				elif msg_type == "config":
 					tts_mode = payload.get("tts_mode", tts_mode)
+					print(f"[WS Call] Configured TTS mode: {tts_mode}")
 
 				elif msg_type == "user_text":
 					text = payload.get("text", "").strip()
@@ -200,7 +206,11 @@ async def websocket_call_endpoint(websocket: WebSocket):
 						{"role": "system", "content": "You are a voice assistant in a live phone call. Keep answers concise, clear, and direct."}
 					]
 
-	except WebSocketDisconnect:
-		await cancel_ongoing_assistant()
-	except Exception:
+	except WebSocketDisconnect as e:
+		print(f"[WS Call] Disconnected: code={e.code}")
+	except Exception as e:
+		print(f"[WS Call Error] Unexpected exception: {e}")
+		import traceback
+		traceback.print_exc()
+	finally:
 		await cancel_ongoing_assistant()

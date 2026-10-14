@@ -98,25 +98,76 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 	const startCall = useCallback(async () => {
 		try {
 			setStatus("connecting")
+
+			let micStream = null
+			let audioCtx = null
+			let processor = null
+
+			if (settings?.useBrowserSTT) {
+				const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition
+				if (!SpeechRec) {
+					alert("Tu navegador no soporta SpeechRecognition nativo. Desactiva 'Browser STT' en Configuración.")
+					setStatus("disconnected")
+					return
+				}
+			} else {
+				if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+					alert("El acceso al micrófono requiere una conexión segura (HTTPS o localhost) o habilitar permisos en el navegador. En Android Chrome puedes habilitarlo en chrome://flags/#unsafely-treat-insecure-origin-as-secure agregando http://" + window.location.host)
+					setStatus("error")
+					return
+				}
+
+				try {
+					micStream = await navigator.mediaDevices.getUserMedia({
+						audio: {
+							channelCount: 1,
+							sampleRate: 16000,
+							echoCancellation: true,
+							noiseSuppression: true,
+							autoGainControl: true
+						}
+					})
+					micStreamRef.current = micStream
+
+					audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+						sampleRate: 16000
+					})
+					audioContextRef.current = audioCtx
+
+					const source = audioCtx.createMediaStreamSource(micStream)
+					processor = audioCtx.createScriptProcessor(4096, 1, 1)
+					processorRef.current = processor
+
+					source.connect(processor)
+					processor.connect(audioCtx.destination)
+				} catch (micErr) {
+					console.error("Microphone permission/access error:", micErr)
+					alert("Error al acceder al micrófono: " + (micErr.message || micErr.name))
+					setStatus("error")
+					endCall()
+					return
+				}
+			}
+
 			const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
 			const host = window.location.host
 			const wsUrl = `${protocol}//${host}/ws/call`
+			console.log("[VoiceCall] Connecting to WebSocket:", wsUrl)
 
 			const ws = new WebSocket(wsUrl)
 			wsRef.current = ws
 
-			ws.onopen = async () => {
+			ws.onopen = () => {
+				console.log("[VoiceCall] WebSocket connected successfully")
 				setStatus("connected")
 				setIsInCall(true)
 
-				// Inform backend whether to synthesize audio or send text sentences
 				ws.send(JSON.stringify({
 					type: "config",
 					tts_mode: settings?.useBrowserTTS ? "browser" : "rpi5"
 				}))
 
 				if (settings?.useBrowserSTT) {
-					// Use client-side Web Speech Recognition
 					const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition
 					if (SpeechRec) {
 						const rec = new SpeechRec()
@@ -138,32 +189,10 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 						rec.start()
 						speechRecRef.current = rec
 					}
-				} else {
-					// Setup Microphone capture with native Echo Cancellation for RPi5 Vosk
-					const stream = await navigator.mediaDevices.getUserMedia({
-						audio: {
-							channelCount: 1,
-							sampleRate: 16000,
-							echoCancellation: true,
-							noiseSuppression: true,
-							autoGainControl: true
-						}
-					})
-					micStreamRef.current = stream
-
-					const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-						sampleRate: 16000
-					})
-					audioContextRef.current = audioCtx
-
-					const source = audioCtx.createMediaStreamSource(stream)
-					const processor = audioCtx.createScriptProcessor(4096, 1, 1)
-					processorRef.current = processor
-
+				} else if (processor) {
 					processor.onaudioprocess = (e) => {
 						if (isMuted) return
 						const inputData = e.inputBuffer.getChannelData(0)
-
 						const pcm16 = new Int16Array(inputData.length)
 						for (let i = 0; i < inputData.length; i++) {
 							const s = Math.max(-1, Math.min(1, inputData[i]))
@@ -174,9 +203,6 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 							ws.send(pcm16.buffer)
 						}
 					}
-
-					source.connect(processor)
-					processor.connect(audioCtx.destination)
 				}
 			}
 
@@ -211,20 +237,21 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 				}
 			}
 
-			ws.onclose = () => {
+			ws.onclose = (event) => {
+				console.warn(`[VoiceCall] WebSocket closed: code=${event.code}, reason=${event.reason || "none"}`)
 				endCall()
 			}
 
 			ws.onerror = (err) => {
-				console.error("WS error:", err)
+				console.error("[VoiceCall] WebSocket error:", err)
 				endCall()
 			}
 		} catch (err) {
-			console.error("Failed to start call:", err)
+			console.error("[VoiceCall] Failed to start call:", err)
 			setStatus("error")
 			endCall()
 		}
-	}, [enqueueAudioChunk, isMuted, settings])
+	}, [endCall, enqueueAudioChunk, isMuted, settings])
 
 	const endCall = useCallback(() => {
 		stopCurrentAudioPlayback()
@@ -274,9 +301,17 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 
 	useEffect(() => {
 		return () => {
-			endCall()
+			stopCurrentAudioPlayback()
+			if (wsRef.current) {
+				try { wsRef.current.close() } catch (e) {}
+				wsRef.current = null
+			}
+			if (micStreamRef.current) {
+				try { micStreamRef.current.getTracks().forEach((t) => t.stop()) } catch (e) {}
+				micStreamRef.current = null
+			}
 		}
-	}, [endCall])
+	}, [stopCurrentAudioPlayback])
 
 	return {
 		isInCall,

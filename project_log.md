@@ -436,3 +436,17 @@
 - **Solución**:
 	- Se actualizaron [send.bat](file:///c:/work/person/hassan/Repos/ollama-proxy/send.bat) y [build.bat](file:///c:/work/person/hassan/Repos/ollama-proxy/build.bat) con un bucle de despacho que procesa listas separadas por comas o espacios (ej. `v,p` o `i,v,p`).
 	- Se removió por completo la sincronización forzada de `docker-compose.yml` de `send.bat`.
+
+### 📝 Registro: [v0.7.18] - Correccion de cierre inmediato de WebSocket en modo llamada
+- **date-time**: 2026-10-14 03:11:00
+- **Problema**:
+	- Al presionar el boton para iniciar la llamada de voz, el WebSocket se cerraba al instante.
+- **Causa**:
+	- En `useVoiceCall.js`, el `useEffect` de limpieza tenia `[endCall]` en sus dependencias, provocando que cualquier actualizacion de estado disparara el desmontaje y cierre del socket por re-render.
+	- La adquisicion de microfono `getUserMedia` se ejecutaba dentro de `ws.onopen` sin captura de excepciones, fallando silenciosamente si el contexto no era seguro (HTTP) o no habia permisos concedidos.
+	- En el backend `call_ws.py`, no se comprobaba el mensaje `websocket.disconnect` antes de llamar recursivamente a `receive()`, arrojando errores ASGI en Starlette.
+- **Solución**:
+	- Se desacoplo la limpieza del hook para que solo se ejecute al desmontar el componente (`[]`).
+	- Se traslado la peticion de microfono antes de la conexion WebSocket para validar permisos y contextos HTTP/HTTPS de forma interactiva.
+	- Se anadio soporte explicito de desconexion y trazabilidad detallada de logs tanto en el backend (`call_ws.py`) como en el hook (`useVoiceCall.js`).
+	- Se compilo el nuevo bundle frontend en `interface/frontend/dist`.
