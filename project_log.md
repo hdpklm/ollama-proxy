@@ -404,3 +404,16 @@
 - **Solución**:
 	- Se mapearon volumenes de codigo fuente en [docker-compose.yml](file:///c:/work/person/hassan/Repos/ollama-proxy/docker-compose.yml) para `ollama-proxy` (`./backend`, `./main.py`), `interface` (`routes`, `services`, `main.py`, `config.py`, `frontend/dist`), `piper-tts` y `vosk-stt` (`main.py`).
 	- Ahora cualquier modificacion se aplica en la RPi5 con un simple `git pull` y `docker compose restart <servicio>` en 1 segundo.
+
+### 📝 Registro: [v0.7.15] - Conversion de interfaz a PWA instalable en Android
+- **date-time**: 2026-10-14 02:32:00
+- **Problema**:
+	- Se requeria poder instalar la aplicacion web de interfaz directamente en Android como aplicacion independiente (PWA) desde el navegador.
+- **Causa**:
+	- La aplicacion carecia de Web App Manifest, Service Worker y metadatos moviles necesarios para que Chrome/Android ofrezca la instalacion.
+- **Solución**:
+	- Se creo [manifest.webmanifest](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/public/manifest.webmanifest) con soporte `standalone`, orientacion `portrait` e iconos dedicados (192x192, 512x512 y maskable).
+	- Se implemento [sw.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/public/sw.js) para gestion de cache offline y soporte completo de PWA.
+	- Se actualizaron los metadatos de [index.html](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/index.html) y el registro en [main.jsx](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/main.jsx).
+	- Se anadio detector de `beforeinstallprompt` y boton interactivo "Instalar" en la cabecera de [App.jsx](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/App.jsx).
+	- Se reconstruyo el bundle de produccion en `interface/frontend/dist`.

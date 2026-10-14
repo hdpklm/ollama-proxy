@@ -1,5 +1,5 @@
-import React, { useState } from "react"
-import { MessageSquare, Phone, Sparkles, Settings as SettingsIcon } from "lucide-react"
+import React, { useState, useEffect } from "react"
+import { MessageSquare, Phone, Sparkles, Settings as SettingsIcon, Download } from "lucide-react"
 import ChatView from "./components/ChatView"
 import CallView from "./components/CallView"
 import SettingsModal from "./components/SettingsModal"
@@ -8,6 +8,27 @@ import { useVoiceCall } from "./hooks/useVoiceCall"
 export default function App() {
 	const [activeTab, setActiveTab] = useState("call")
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+	const [deferredPrompt, setDeferredPrompt] = useState(null)
+
+	useEffect(() => {
+		const handleBeforeInstallPrompt = (e) => {
+			e.preventDefault()
+			setDeferredPrompt(e)
+		}
+		window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt)
+		return () => {
+			window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt)
+		}
+	}, [])
+
+	const handleInstallApp = async () => {
+		if (!deferredPrompt) return
+		deferredPrompt.prompt()
+		const choice = await deferredPrompt.userChoice
+		if (choice.outcome === "accepted") {
+			setDeferredPrompt(null)
+		}
+	}
 
 	const [settings, setSettings] = useState(() => {
 		try {
@@ -73,6 +94,18 @@ export default function App() {
 							<span>Chat Mode</span>
 						</button>
 					</div>
+
+					{/* PWA Install Button */}
+					{deferredPrompt && (
+						<button
+							onClick={handleInstallApp}
+							className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium shadow-md shadow-sky-600/30 transition-all animate-pulse"
+							title="Instalar App en el dispositivo"
+						>
+							<Download className="w-3.5 h-3.5" />
+							<span className="hidden sm:inline">Instalar</span>
+						</button>
+					)}
 
 					{/* Settings Trigger */}
 					<button
