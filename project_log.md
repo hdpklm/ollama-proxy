@@ -394,3 +394,13 @@
 	- Se utilizaban indices numericos sin asociacion directa a las iniciales de los contenedores.
 - **Solución**:
 	- Se modificaron [build.bat](file:///c:/work/person/hassan/Repos/ollama-proxy/build.bat) y [send.bat](file:///c:/work/person/hassan/Repos/ollama-proxy/send.bat) para utilizar `*` para todos los servicios e iniciales claras: `i` (interface), `p` (piper-tts), `v` (vosk-stt) y `o` (ollama-proxy), manteniendo compatibilidad retroactiva.
+
+### 📝 Registro: [v0.7.14] - Montaje en caliente (bind mounts) de codigo fuente en docker-compose.yml
+- **date-time**: 2026-10-14 02:26:00
+- **Problema**:
+	- Cualquier cambio en el codigo fuente requeria reconstruir la imagen Docker completa y retransferirla por la red a la RPi5.
+- **Causa**:
+	- El codigo residia unicamente dentro de las capas compiladas del contenedor, sin enlaces directos al repositorio local del host.
+- **Solución**:
+	- Se mapearon volumenes de codigo fuente en [docker-compose.yml](file:///c:/work/person/hassan/Repos/ollama-proxy/docker-compose.yml) para `ollama-proxy` (`./backend`, `./main.py`), `interface` (`routes`, `services`, `main.py`, `config.py`, `frontend/dist`), `piper-tts` y `vosk-stt` (`main.py`).
+	- Ahora cualquier modificacion se aplica en la RPi5 con un simple `git pull` y `docker compose restart <servicio>` en 1 segundo.

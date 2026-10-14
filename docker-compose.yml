@@ -27,6 +27,8 @@ services:
     env_file:
       - .env
     volumes:
+      - ./backend:/app/backend
+      - ./main.py:/app/main.py
       - ${OLLAMA_MODELS_DIR:-/usr/share/ollama/.ollama/models/blobs}:/usr/share/ollama/.ollama/models/blobs:ro
       - ./modelos:/app/modelos:ro
       - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
@@ -57,6 +59,11 @@ services:
       - PROXY_API_KEY=${PROXY_API_KEY:-cambia_esta_clave}
       - UV_CACHE_DIR=/root/.cache/uv
     volumes:
+      - ./interface/backend/routes:/app/routes
+      - ./interface/backend/services:/app/services
+      - ./interface/backend/main.py:/app/main.py
+      - ./interface/backend/config.py:/app/config.py
+      - ./interface/frontend/dist:/app/frontend/dist
       - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
     restart: unless-stopped
 
@@ -76,6 +83,7 @@ services:
       - VOICE_NAME=es_ES-sharvard-medium
       - UV_CACHE_DIR=/root/.cache/uv
     volumes:
+      - ./dockers/piper/main.py:/app/main.py
       - ./modelos/piper:/app/modelos
       - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
     restart: unless-stopped
@@ -95,6 +103,7 @@ services:
       - MODELS_DIR=/app/modelos
       - UV_CACHE_DIR=/root/.cache/uv
     volumes:
+      - ./dockers/vosk/main.py:/app/main.py
       - ./modelos/vosk:/app/modelos
       - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
     restart: unless-stopped
