@@ -460,3 +460,13 @@
 - **Solución**:
 	- Se reordeno la declaracion en [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js), definiendo `endCall` antes de `startCall`.
 	- Se reconstruyo el bundle de produccion en `interface/frontend/dist`.
+
+### 📝 Registro: [v0.7.20] - Preconfiguracion de cabeceras WAV en Piper TTS para evitar crash por fonemas vacios
+- **date-time**: 2026-10-14 13:32:00
+- **Problema**:
+	- Al sintetizar audio en `piper-tts`, FastAPI arrojaba un error 500: `wave.Error: # channels not specified` al salir del contexto `with wave.open(...)`.
+- **Causa**:
+	- Piper TTS inicializa las cabeceras del objeto `wave.Wave_write` de forma perezosa al recibir el primer bloque de audio sintetizado. Si el texto enviado solo contiene signos de puntuacion (ej. `. . .` o silencios) o produce 0 chunks de audio, Piper no escribe datos y el modulo `wave` de Python falla al cerrar el archivo si no se han especificado los canales ni el sample rate.
+- **Solución**:
+	- En [dockers/piper/main.py](file:///c:/work/person/hassan/Repos/ollama-proxy/dockers/piper/main.py), se preconfiguraron explicitamente los parametros `setnchannels(1)`, `setsampwidth(2)` y `setframerate(sample_rate)` antes de invocar `voice.synthesize`.
+	- Se anadio la funcion `create_empty_wav` para retornar cabeceras WAV validas de forma inmediata si el texto no contiene caracteres alfanumericos.

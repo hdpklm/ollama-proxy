@@ -48,13 +48,30 @@ def health():
 		"loaded": voice is not None
 	}
 
+def create_empty_wav(sample_rate: int = 22050) -> bytes:
+	buf = io.BytesIO()
+	with wave.open(buf, "wb") as wf:
+		wf.setnchannels(1)
+		wf.setsampwidth(2)
+		wf.setframerate(sample_rate)
+	return buf.getvalue()
+
 def synthesize_text_to_wav(text: str) -> bytes:
 	global voice
 	if not voice:
 		raise HTTPException(status_code=503, detail="Voice model not initialized")
 
+	sample_rate = getattr(getattr(voice, "config", None), "sample_rate", 22050)
+
+	# Avoid Piper empty phonemes bug on text with only punctuation or whitespace
+	if not any(c.isalnum() for c in text):
+		return create_empty_wav(sample_rate)
+
 	buffer = io.BytesIO()
 	with wave.open(buffer, "wb") as wav_file:
+		wav_file.setnchannels(1)
+		wav_file.setsampwidth(2)
+		wav_file.setframerate(sample_rate)
 		voice.synthesize(text, wav_file)
 	return buffer.getvalue()
 
