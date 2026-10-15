@@ -1,4 +1,4 @@
-# Project Status - Ollama Priority Proxy v0.7.39
+# Project Status - Ollama Priority Proxy v0.7.40
 
 ## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Interface Voice/Chat Module (PWA) + Standalone TTS/STT Services
 Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, modulo desacoplado de interfaz web PWA instalable en Android/navegador (React + Vite + Tailwind + Service Worker + Manifest), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS), microservicios independientes para Piper TTS y Vosk STT, y scripts desacoplados de compilacion local (`build.bat`) y transferencia directa SSH (`send.bat`).
@@ -27,7 +27,7 @@ Proxy HTTP y planificador de tokens por turno estricto con contextos KV independ
 - `src/components/SettingsModal.jsx`: Modal de configuracion para alternar TTS (Navegador/RPi5), STT (Navegador/RPi5) e interrupcion por voz (Barge-in on/off).
 - `src/components/ChatView.jsx`: Interfaz de mensajeria con dictado por voz WebSocket en tiempo real que vuelca el texto al campo de entrada para revision del usuario.
 - `src/components/CallView.jsx`: Vista de llamada interactiva a pantalla completa con ondas de audio reactivas, subtitulos parciales en vivo y gestion de microfono.
-- `src/hooks/useVoiceCall.js`: Hook para gestion de canal WebSocket con salida directa de audio a playCtx.destination, visualizacion en tiempo real de habla del usuario y cancelacion nativa de eco por hardware.
+- `src/hooks/useVoiceCall.js`: Hook para gestion de llamada WebSocket bidireccional con 3 modos de AEC seleccionables (Nativo HTMLAudioElement, Silero VAD y WebRTC AEC3 con calibracion acustica inicial).
 
 ### `backend/config.py`
 - `config`: Gestiona variables de entorno, configuraciones de contexto/hilos y resolucion de rutas GGUF.

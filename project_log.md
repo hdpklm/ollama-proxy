@@ -709,3 +709,16 @@
 	- Añadido manejador del evento `playback_status` para que el cliente notifique cuando la reproducción física de audio en altavoces está activa (`is_assistant_busy`), respetando el silenciamiento estricto cuando `allow_barge_in` esté desactivado.
 	- Descartada por completo cualquier comparación de texto artificial.
 	- Incrementada la versión a `v0.7.39` en `project_status.md`.
+
+### 📝 Registro: [v0.7.40] - Implementación de 3 Modos de Cancelación de Eco (AEC) y Calibración Acústica
+- **date-time**: 2026-10-16 00:55:00
+- **Problema**:
+	- En llamadas continuas de voz en streaming, el audio emitido por los altavoces se retroalimentaba al micrófono provocando un bucle de eco infinito. La cancelación nativa de Web Audio fallaba por enrutamiento a playCtx.destination y falta de sincronización de retardos.
+- **Causa**:
+	- En navegadores Chromium, la API Web Audio desconecta la referencia interna de AEC del hardware cuando se reproduce en nodos personalizados. Además, la estimación del retardo entre altavoz y micrófono en WebAssembly (AEC3) tarda varios segundos en converger sin una calibración inicial de latencia física.
+- **Solución**:
+	- `interface/frontend/src/App.jsx` y `interface/frontend/src/components/SettingsModal.jsx`: añadido selector con 3 modos de AEC configurables:
+		1. Modo 1 (Nativo): Reproducción vía `HTMLAudioElement` (`new Audio(blobUrl)`) conectada al sink nativo del sistema, eliminando el compresor agresivo del micrófono para permitir al AEC hardware de Android/Chromium aislar la voz.
+		2. Modo 2 (Híbrido): `HTMLAudioElement` + `@ricky0123/vad-web` (Silero VAD en WASM offline). Discrimina si el audio entrante es voz humana y bloquea el micrófono mientras el altavoz suena a menos que el usuario hable.
+		3. Modo 3 (Avanzado): `@ennuicastr/webrtcaec3.js` en WASM con análisis de referencia de audio y procesador AEC3, complementado con un tono de calibración acústico inicial para medir la latencia física de la sala y fijar `setAudioBufferDelay`.
+	- Copiados los artefactos estáticos de VAD (`silero_vad_v5.onnx`, `vad.worklet.bundle.min.js`, onnxruntime wasm) a `public/vad/` y de AEC3 a `public/aec/`.

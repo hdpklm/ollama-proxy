@@ -33,9 +33,12 @@ export default function App() {
 	const [settings, setSettings] = useState(() => {
 		try {
 			const saved = localStorage.getItem("voice_llm_settings")
-			if (saved) return JSON.parse(saved)
+			if (saved) {
+				const parsed = JSON.parse(saved)
+				return { aecMode: "native", ...parsed }
+			}
 		} catch (e) {}
-		return { useBrowserTTS: false, useBrowserSTT: false, allowBargeIn: true }
+		return { useBrowserTTS: false, useBrowserSTT: false, allowBargeIn: true, aecMode: "native" }
 	})
 
 	const handleUpdateSettings = (newVals) => {

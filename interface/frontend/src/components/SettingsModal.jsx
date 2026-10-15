@@ -1,5 +1,5 @@
 import React from "react"
-import { X, Cpu, Globe, Sliders } from "lucide-react"
+import { X, Cpu, Globe, Sliders, Waves } from "lucide-react"
 
 export default function SettingsModal({ isOpen, onClose, settings, onUpdateSettings }) {
 	if (!isOpen) return null
@@ -125,6 +125,41 @@ export default function SettingsModal({ isOpen, onClose, settings, onUpdateSetti
 								</p>
 							</div>
 						</label>
+					</div>
+
+					{/* Option 4: AEC Mode (Cancelación de Eco) */}
+					<div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80">
+						<div className="flex items-start gap-3">
+							<div className="p-1.5 rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20 mt-0.5">
+								<Waves className="w-4 h-4" />
+							</div>
+							<div className="flex-1">
+								<div className="flex items-center justify-between mb-1.5">
+									<span className="text-sm font-medium text-slate-200">
+										Cancelación de Eco y Procesamiento
+									</span>
+									<span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 uppercase font-mono">
+										{settings.aecMode || "native"}
+									</span>
+								</div>
+								<select
+									value={settings.aecMode || "native"}
+									onChange={(e) => onUpdateSettings({ aecMode: e.target.value })}
+									className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+								>
+									<option value="native">Modo 1: Nativo (HTML5 Audio + AEC Hardware)</option>
+									<option value="vad">Modo 2: Híbrido (HTML5 Audio + Silero VAD)</option>
+									<option value="wasm">Modo 3: Avanzado (WASM AEC3 + Sincro/Calibración)</option>
+								</select>
+								<p className="text-xs text-slate-400 mt-2 leading-relaxed">
+									{settings.aecMode === "wasm"
+										? "AEC3 de WebRTC en WebAssembly. Emite un tono sutil al iniciar para medir la latencia física de la sala y sustraer el eco por software."
+										: settings.aecMode === "vad"
+										? "Silero VAD en el navegador. Analiza la voz humana en tiempo real y corta la transmisión hacia Vosk si solo suena el altavoz."
+										: "Reproduce vía HTMLAudioElement directo sin compresor de micro. Usa la cancelación nativa por hardware del navegador."}
+								</p>
+							</div>
+						</div>
 					</div>
 				</div>
 
