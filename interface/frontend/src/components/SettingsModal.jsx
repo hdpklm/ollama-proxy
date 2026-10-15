@@ -93,6 +93,39 @@ export default function SettingsModal({ isOpen, onClose, settings, onUpdateSetti
 							</div>
 						</label>
 					</div>
+
+					{/* Option 3: Barge-in (Interrupción por voz) */}
+					<div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80">
+						<label className="flex items-start gap-3 cursor-pointer">
+							<input
+								type="checkbox"
+								checked={settings.allowBargeIn !== false}
+								onChange={(e) => onUpdateSettings({ allowBargeIn: e.target.checked })}
+								className="mt-1 w-4 h-4 rounded text-sky-600 bg-slate-900 border-slate-700 focus:ring-sky-500/40"
+							/>
+							<div className="flex-1">
+								<div className="flex items-center gap-2">
+									<span className="text-sm font-medium text-slate-200">
+										Interrumpir al hablar (Barge-in)
+									</span>
+									{settings.allowBargeIn !== false ? (
+										<span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+											Activado
+										</span>
+									) : (
+										<span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 border border-slate-500/20">
+											Desactivado
+										</span>
+									)}
+								</div>
+								<p className="text-xs text-slate-400 mt-1 leading-relaxed">
+									{settings.allowBargeIn !== false
+										? "Si empiezas a hablar mientras el asistente responde, parará de hablar de inmediato para escucharte y responder a tu nueva pregunta."
+										: "El asistente terminará de hablar completamente antes de volver a escuchar. Ideal si hay ruido ambiente o prefieres escuchar sin interrupciones."}
+								</p>
+							</div>
+						</label>
+					</div>
 				</div>
 
 				{/* Footer */}

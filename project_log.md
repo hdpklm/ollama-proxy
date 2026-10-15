@@ -541,3 +541,20 @@
 	- En [call_ws.py](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/routes/call_ws.py):
 		1. Se removió el estado bloqueante `is_assistant_turn`, permitiendo la recepción continua y sin latencia de audio filtrado por AEC.
 	- Se reconstruyó el bundle estático de producción (`pnpm build`) en `interface/frontend/dist`.
+
+### 📝 Registro: [v0.7.25] - Configuración de interrupción por voz del asistente (Barge-in / Full-Duplex vs Half-Duplex)
+- **date-time**: 2026-10-15 03:18:00
+- **Problema**:
+	- El usuario requería poder configurar en las opciones si desea que al hablar mientras el asistente está respondiendo, el asistente se interrumpa de inmediato y escuche la nueva pregunta para responderla, o que espere a terminar su locución completa sin interrupciones.
+- **Causa**:
+	- Hasta ahora el sistema funcionaba con cancelación de eco pero no exponía un toggle explícito de barge-in ("Interrumpir al hablar"). En entornos con mucho ruido ambiental o altavoz elevado, el usuario puede preferir Half-Duplex (no interrumpir al asistente hasta que termine de hablar) o Full-Duplex (barge-in instantáneo con cancelación y descarte de cola de audio).
+- **Solución**:
+	- Añadido toggle en `SettingsModal.jsx` para "Interrumpir al hablar (Barge-in)" con persistencia en `localStorage` (`voice_llm_settings.allowBargeIn`).
+	- En `useVoiceCall.js`:
+		- Si `allowBargeIn` está desactivado y el asistente está reproduciendo (`isPlayingRef.current`), se omite el envío de tramas de micrófono y eventos STT.
+		- Si `allowBargeIn` está activado (por defecto) y el usuario habla o se detecta `user_transcript`, se invoca de inmediato `stopCurrentAudioPlayback()` deteniendo el elemento HTMLAudio y vaciando la cola.
+		- Sincronización dinámica de `allow_barge_in` por WebSocket al cambiar las opciones.
+	- En `call_ws.py`:
+		- Se recibe `allow_barge_in` en el mensaje `config`.
+		- Si `allow_barge_in` es falso y existe un `current_task` en curso del asistente, se descartan las tramas binarias de audio y `user_text` entrantes.
+	- Actualizada la versión a `v0.7.25` en `project_status.md`.

@@ -35,7 +35,7 @@ export default function App() {
 			const saved = localStorage.getItem("voice_llm_settings")
 			if (saved) return JSON.parse(saved)
 		} catch (e) {}
-		return { useBrowserTTS: false, useBrowserSTT: false }
+		return { useBrowserTTS: false, useBrowserSTT: false, allowBargeIn: true }
 	})
 
 	const handleUpdateSettings = (newVals) => {

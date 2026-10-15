@@ -79,6 +79,7 @@ async def websocket_call_endpoint(websocket: WebSocket):
 		await process_user_speech()
 
 	tts_mode = "rpi5"
+	allow_barge_in = True
 
 	async def run_assistant_pipeline(user_prompt: str):
 		audio_buffer.clear()
@@ -163,6 +164,8 @@ async def websocket_call_endpoint(websocket: WebSocket):
 				break
 
 			if "bytes" in message and message["bytes"]:
+				if not allow_barge_in and current_task and not current_task.done():
+					continue
 				data = message["bytes"]
 				audio_buffer.extend(data)
 
@@ -179,6 +182,8 @@ async def websocket_call_endpoint(websocket: WebSocket):
 				msg_type = payload.get("type")
 
 				if msg_type == "audio_chunk":
+					if not allow_barge_in and current_task and not current_task.done():
+						continue
 					b64_data = payload.get("data", "")
 					if b64_data:
 						raw_data = base64.b64decode(b64_data)
@@ -189,9 +194,12 @@ async def websocket_call_endpoint(websocket: WebSocket):
 
 				elif msg_type == "config":
 					tts_mode = payload.get("tts_mode", tts_mode)
-					print(f"[WS Call] Configured TTS mode: {tts_mode}")
+					allow_barge_in = bool(payload.get("allow_barge_in", allow_barge_in))
+					print(f"[WS Call] Configured TTS mode: {tts_mode}, allow_barge_in: {allow_barge_in}")
 
 				elif msg_type == "user_text":
+					if not allow_barge_in and current_task and not current_task.done():
+						continue
 					text = payload.get("text", "").strip()
 					if text:
 						await cancel_ongoing_assistant()

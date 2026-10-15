@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 
-export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: false }) {
+export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: false, allowBargeIn: true }) {
 	const [isInCall, setIsInCall] = useState(false)
 	const [isMuted, setIsMuted] = useState(false)
 	const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false)
@@ -237,7 +237,8 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 
 				ws.send(JSON.stringify({
 					type: "config",
-					tts_mode: settings?.useBrowserTTS ? "browser" : "rpi5"
+					tts_mode: settings?.useBrowserTTS ? "browser" : "rpi5",
+					allow_barge_in: settings?.allowBargeIn !== false
 				}))
 
 				if (settings?.useBrowserSTT) {
@@ -248,10 +249,17 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 						rec.continuous = true
 						rec.interimResults = true
 						rec.onresult = (e) => {
+							if (settings?.allowBargeIn === false && isPlayingRef.current) return
 							for (let i = e.resultIndex; i < e.results.length; ++i) {
 								const trans = e.results[i][0].transcript
 								setUserTranscript(trans)
+								if (settings?.allowBargeIn !== false && trans.trim().length > 1) {
+									stopCurrentAudioPlayback()
+								}
 								if (e.results[i].isFinal && trans.trim()) {
+									if (settings?.allowBargeIn !== false) {
+										stopCurrentAudioPlayback()
+									}
 									if (ws.readyState === WebSocket.OPEN) {
 										ws.send(JSON.stringify({ type: "user_text", text: trans.trim() }))
 									}
@@ -273,6 +281,7 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 				} else if (processor) {
 					processor.onaudioprocess = (e) => {
 						if (isMutedRef.current) return
+						if (settings?.allowBargeIn === false && isPlayingRef.current) return
 						const inputData = e.inputBuffer.getChannelData(0)
 						const pcm16 = new Int16Array(inputData.length)
 						for (let i = 0; i < inputData.length; i++) {
@@ -291,6 +300,9 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 				try {
 					const msg = JSON.parse(event.data)
 					if (msg.type === "user_transcript") {
+						if (settings?.allowBargeIn !== false) {
+							stopCurrentAudioPlayback()
+						}
 						setUserTranscript(msg.text)
 						setCallHistory((prev) => [...prev, { role: "user", text: msg.text }])
 					} else if (msg.type === "assistant_thinking") {
@@ -340,6 +352,16 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 			return !prev
 		})
 	}, [])
+
+	useEffect(() => {
+		if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+			wsRef.current.send(JSON.stringify({
+				type: "config",
+				tts_mode: settings?.useBrowserTTS ? "browser" : "rpi5",
+				allow_barge_in: settings?.allowBargeIn !== false
+			}))
+		}
+	}, [settings?.useBrowserTTS, settings?.allowBargeIn])
 
 	useEffect(() => {
 		return () => {
