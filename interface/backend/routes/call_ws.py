@@ -37,7 +37,7 @@ async def websocket_call_endpoint(websocket: WebSocket):
 		return buf.getvalue()
 
 	async def cancel_ongoing_assistant():
-		nonlocal current_task
+		nonlocal current_task, silence_timer_task
 		if current_task and not current_task.done():
 			current_task.cancel()
 			try:
@@ -45,6 +45,9 @@ async def websocket_call_endpoint(websocket: WebSocket):
 			except asyncio.CancelledError:
 				pass
 			current_task = None
+		audio_buffer.clear()
+		if silence_timer_task and not silence_timer_task.done():
+			silence_timer_task.cancel()
 
 	async def process_user_speech():
 		nonlocal audio_buffer, current_task
@@ -137,6 +140,9 @@ async def websocket_call_endpoint(websocket: WebSocket):
 					})
 
 			conversation_history.append({"role": "assistant", "content": accumulated_full_text})
+			audio_buffer.clear()
+			if silence_timer_task and not silence_timer_task.done():
+				silence_timer_task.cancel()
 			await websocket.send_json({
 				"type": "assistant_done",
 				"full_text": accumulated_full_text
@@ -149,6 +155,10 @@ async def websocket_call_endpoint(websocket: WebSocket):
 				"type": "error",
 				"message": str(e)
 			})
+		finally:
+			audio_buffer.clear()
+			if silence_timer_task and not silence_timer_task.done():
+				silence_timer_task.cancel()
 
 	try:
 		while True:
@@ -159,6 +169,10 @@ async def websocket_call_endpoint(websocket: WebSocket):
 				break
 
 			if "bytes" in message and message["bytes"]:
+				if current_task and not current_task.done():
+					# Drop microphone frames while assistant is generating/speaking to prevent echo loops
+					continue
+
 				data = message["bytes"]
 				audio_buffer.extend(data)
 

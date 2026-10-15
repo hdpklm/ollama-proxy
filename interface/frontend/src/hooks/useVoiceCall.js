@@ -10,10 +10,15 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 	const [status, setStatus] = useState("disconnected")
 
 	const wsRef = useRef(null)
-	const audioContextRef = useRef(null)
+	const micContextRef = useRef(null)
+	const playbackContextRef = useRef(null)
 	const micStreamRef = useRef(null)
 	const processorRef = useRef(null)
 	const speechRecRef = useRef(null)
+
+	const isMutedRef = useRef(false)
+	const isAssistantSpeakingRef = useRef(false)
+	const isInCallRef = useRef(false)
 
 	// Audio playback queue
 	const audioQueueRef = useRef([])
@@ -34,17 +39,25 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 			currentAudioSourceRef.current = null
 		}
 		isPlayingRef.current = false
+		isAssistantSpeakingRef.current = false
 		setIsAssistantSpeaking(false)
 	}, [settings])
 
 	const playNextAudioChunk = useCallback(async () => {
 		if (audioQueueRef.current.length === 0) {
-			isPlayingRef.current = false
-			setIsAssistantSpeaking(false)
+			currentAudioSourceRef.current = null
+			setTimeout(() => {
+				if (audioQueueRef.current.length === 0) {
+					isPlayingRef.current = false
+					isAssistantSpeakingRef.current = false
+					setIsAssistantSpeaking(false)
+				}
+			}, 300)
 			return
 		}
 
 		isPlayingRef.current = true
+		isAssistantSpeakingRef.current = true
 		setIsAssistantSpeaking(true)
 
 		const base64Audio = audioQueueRef.current.shift()
@@ -56,17 +69,17 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 				bytes[i] = binaryString.charCodeAt(i)
 			}
 
-			if (!audioContextRef.current || audioContextRef.current.state === "closed") {
-				audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)()
+			if (!playbackContextRef.current || playbackContextRef.current.state === "closed") {
+				playbackContextRef.current = new (window.AudioContext || window.webkitAudioContext)()
 			}
-			if (audioContextRef.current.state === "suspended") {
-				await audioContextRef.current.resume()
+			if (playbackContextRef.current.state === "suspended") {
+				await playbackContextRef.current.resume()
 			}
 
-			const audioBuffer = await audioContextRef.current.decodeAudioData(bytes.buffer.slice(0))
-			const source = audioContextRef.current.createBufferSource()
+			const audioBuffer = await playbackContextRef.current.decodeAudioData(bytes.buffer.slice(0))
+			const source = playbackContextRef.current.createBufferSource()
 			source.buffer = audioBuffer
-			source.connect(audioContextRef.current.destination)
+			source.connect(playbackContextRef.current.destination)
 			currentAudioSourceRef.current = source
 
 			source.onended = () => {
@@ -96,10 +109,12 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 	}, [stopCurrentAudioPlayback])
 
 	const endCall = useCallback(() => {
+		isInCallRef.current = false
 		stopCurrentAudioPlayback()
 
 		if (speechRecRef.current) {
 			try {
+				speechRecRef.current.onend = null
 				speechRecRef.current.stop()
 			} catch (e) {}
 			speechRecRef.current = null
@@ -117,11 +132,18 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 			processorRef.current = null
 		}
 
-		if (audioContextRef.current) {
+		if (micContextRef.current) {
 			try {
-				audioContextRef.current.close()
+				micContextRef.current.close()
 			} catch (e) {}
-			audioContextRef.current = null
+			micContextRef.current = null
+		}
+
+		if (playbackContextRef.current) {
+			try {
+				playbackContextRef.current.close()
+			} catch (e) {}
+			playbackContextRef.current = null
 		}
 
 		if (wsRef.current) {
@@ -142,7 +164,7 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 			setStatus("connecting")
 
 			let micStream = null
-			let audioCtx = null
+			let micCtx = null
 			let processor = null
 
 			if (settings?.useBrowserSTT) {
@@ -171,17 +193,21 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 					})
 					micStreamRef.current = micStream
 
-					audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+					micCtx = new (window.AudioContext || window.webkitAudioContext)({
 						sampleRate: 16000
 					})
-					audioContextRef.current = audioCtx
+					micContextRef.current = micCtx
 
-					const source = audioCtx.createMediaStreamSource(micStream)
-					processor = audioCtx.createScriptProcessor(4096, 1, 1)
+					const source = micCtx.createMediaStreamSource(micStream)
+					processor = micCtx.createScriptProcessor(4096, 1, 1)
 					processorRef.current = processor
 
+					// Route through a silent gain node to destination so onaudioprocess runs without acoustic feedback
+					const silentGain = micCtx.createGain()
+					silentGain.gain.value = 0
 					source.connect(processor)
-					processor.connect(audioCtx.destination)
+					processor.connect(silentGain)
+					silentGain.connect(micCtx.destination)
 				} catch (micErr) {
 					console.error("Microphone permission/access error:", micErr)
 					alert("Error al acceder al micrófono: " + (micErr.message || micErr.name))
@@ -203,6 +229,7 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 				console.log("[VoiceCall] WebSocket connected successfully")
 				setStatus("connected")
 				setIsInCall(true)
+				isInCallRef.current = true
 
 				ws.send(JSON.stringify({
 					type: "config",
@@ -227,13 +254,21 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 								}
 							}
 						}
+						rec.onend = () => {
+							// Android Chrome stops recognition after silence; restart if call is still active
+							if (isInCallRef.current && settings?.useBrowserSTT) {
+								try {
+									rec.start()
+								} catch (e) {}
+							}
+						}
 						rec.onerror = (e) => console.error("SpeechRec error:", e)
 						rec.start()
 						speechRecRef.current = rec
 					}
 				} else if (processor) {
 					processor.onaudioprocess = (e) => {
-						if (isMuted) return
+						if (isMutedRef.current || isAssistantSpeakingRef.current) return
 						const inputData = e.inputBuffer.getChannelData(0)
 						const pcm16 = new Int16Array(inputData.length)
 						for (let i = 0; i < inputData.length; i++) {
@@ -262,9 +297,20 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 						if (settings?.useBrowserTTS && msg.text) {
 							const utterance = new SpeechSynthesisUtterance(msg.text)
 							utterance.lang = "es-ES"
-							utterance.onstart = () => setIsAssistantSpeaking(true)
-							utterance.onend = () => setIsAssistantSpeaking(false)
-							utterance.onerror = () => setIsAssistantSpeaking(false)
+							utterance.onstart = () => {
+								isAssistantSpeakingRef.current = true
+								setIsAssistantSpeaking(true)
+							}
+							utterance.onend = () => {
+								setTimeout(() => {
+									isAssistantSpeakingRef.current = false
+									setIsAssistantSpeaking(false)
+								}, 300)
+							}
+							utterance.onerror = () => {
+								isAssistantSpeakingRef.current = false
+								setIsAssistantSpeaking(false)
+							}
 							window.speechSynthesis?.speak(utterance)
 						}
 					} else if (msg.type === "assistant_audio_chunk") {
@@ -293,10 +339,13 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 			setStatus("error")
 			endCall()
 		}
-	}, [endCall, enqueueAudioChunk, isMuted, settings])
+	}, [endCall, enqueueAudioChunk, settings])
 
 	const toggleMute = useCallback(() => {
-		setIsMuted((prev) => !prev)
+		setIsMuted((prev) => {
+			isMutedRef.current = !prev
+			return !prev
+		})
 	}, [])
 
 	useEffect(() => {

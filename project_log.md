@@ -484,3 +484,24 @@
 		2. Soporte fallback a `voice.synthesize_stream_raw(text)` para variantes que devuelven directamente bloques de bytes PCM crudos.
 		3. Soporte fallback para variantes legacy con `voice.synthesize_wav(text, wav_file)`.
 	- Con esto, el WAV devuelto contiene la totalidad de los datos PCM sintetizados, permitiendo una reproducción nítida e instantánea en el navegador o dispositivo móvil.
+
+### 📝 Registro: [v0.7.22] - Supresión de eco acústico y corrección de captura continua de micrófono en móviles
+- **date-time**: 2026-10-15 02:40:00
+- **Problema**:
+	- En ordenador portátil: el micrófono grababa la voz del asistente emitida por los altavoces, provocando un bucle de retroalimentación (eco) en el que el asistente se respondía a sí mismo.
+	- En teléfono móvil: el asistente solo escuchaba el primer mensaje del usuario; tras responder el asistente, dejaba de escuchar cualquier mensaje posterior.
+- **Causa**:
+	- En [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js), el procesador de audio `ScriptProcessorNode` estaba conectado directamente al destino de audio (`audioCtx.destination`), alimentando el micrófono directo a los altavoces. En dispositivos móviles con cancelación de eco de hardware (AEC), esto causaba que el sistema operativo silenciara por completo el stream del micrófono tras la primera reproducción.
+	- El bucle `onaudioprocess` no verificaba si el asistente estaba hablando (`isAssistantSpeakingRef.current`), continuando el envío de frames PCM de los altavoces hacia el servidor durante toda la respuesta.
+	- En [call_ws.py](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/routes/call_ws.py), los frames de audio entrantes se seguían acumulando en `audio_buffer` mientras `current_task` estaba activo, y el buffer no se limpiaba al emitir `assistant_done`, enviando el residuo de audio a Vosk 700ms después de que el asistente callara.
+	- En reconocimiento de navegador (`useBrowserSTT`), `webkitSpeechRecognition` en Android Chrome se detiene de forma nativa tras una pausa; la falta de reinicio en el callback `onend` dejaba el reconocimiento inerte para los siguientes turnos.
+- **Solución**:
+	- En [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js):
+		1. Se separaron los contextos de audio: `micContextRef` exclusivo para la captura a 16 kHz y `playbackContextRef` para la reproducción a frecuencia nativa.
+		2. Se enrutó el `ScriptProcessorNode` a través de un `GainNode` con ganancia cero (`silentGain.gain.value = 0`) hacia `destination`, permitiendo el disparo continuo de `onaudioprocess` sin alimentar el micrófono a los altavoces.
+		3. Se agregaron referencias reactivas (`isAssistantSpeakingRef`, `isMutedRef`) que silencian la transmisión de audio por WebSocket mientras el asistente habla, con un periodo de gracia acústica de 300ms tras concluir la reproducción.
+		4. Se implementó el manejador `rec.onend` para reiniciar automáticamente el reconocimiento nativo en Android cuando la llamada sigue activa.
+	- En [call_ws.py](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/routes/call_ws.py):
+		1. Se descartan paquetes PCM de micrófono entrantes si `current_task and not current_task.done()`.
+		2. Se limpian `audio_buffer` y el temporizador de silencio al finalizar `run_assistant_pipeline` (`assistant_done`) y al cancelar la tarea.
+	- Se reconstruyó el bundle estático de producción de la interfaz (`pnpm build`) en `interface/frontend/dist`.
