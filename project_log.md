@@ -685,3 +685,15 @@
 	- En `interface/backend/routes/call_ws.py`, se implementó el endpoint WebSocket `@router.websocket("/ws/chat")` que envía eventos `{ "type": "token", "token": str }` en streaming a medida que el LLM genera cada token, culminando con `{ "type": "done", "full_text": str }`.
 	- En `interface/frontend/src/components/ChatView.jsx`, se refactorizó `handleSend` para conectarse a `/ws/chat`, mostrando el bocadillo de respuesta con actualización progresiva en tiempo real y cursor pulsante, con fallback transparente a HTTP ante caídas de red.
 	- Documentado el endpoint en `project_status.md` y recompilado el frontend con `pnpm build`.
+
+### 📝 Registro: [v0.7.38] - Síntesis TTS por fragmentos y frases progresivas en tiempo real en el Chat
+- **date-time**: 2026-10-15 23:41:00
+- **Problema**:
+	- En la vista de chat, el TTS requería que terminara toda la generación de texto del modelo antes de poder reproducirse, impidiendo escuchar la respuesta mientras se está generando.
+- **Causa**:
+	- `/ws/chat` solo emitía tokens de texto y no integraba `SentenceChunker` ni la síntesis concurrente de fragmentos oracionales en streaming.
+- **Solución**:
+	- `services/sentence_chunker.py`: ampliados los delimitadores para incluir comas, puntos y comas y dos puntos (`re.compile(r'([.!?,;:\n]+)')`) con un umbral de activación de `min_words=2`.
+	- `interface/backend/routes/call_ws.py`: en `@router.websocket("/ws/chat")` se añadió segmentación al vuelo mediante `SentenceChunker`. Al detectar un signo de puntuación delimitador, se sintetiza inmediatamente el fragmento y se envía al cliente como `audio_chunk` (audio base64 para Piper/RPi5) o `tts_sentence` (para TTS nativo del navegador).
+	- `interface/frontend/src/components/ChatView.jsx`: implementada cola de reproducción en streaming (`audioQueueRef`, `browserTtsQueueRef`, Web Audio API) para reproducir progresivamente cada fragmento recibido sin interrupciones, botón "Silenciar" para abortar el habla en cualquier momento e interrupción automática al iniciar un nuevo dictado o enviar mensaje.
+	- Recompilado el frontend con `pnpm build`.

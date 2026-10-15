@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react"
-import { Send, Mic, Square, Play, Pause, Loader2, Bot, User, Volume2 } from "lucide-react"
+import { Send, Mic, Square, Play, Pause, Loader2, Bot, User, Volume2, VolumeX } from "lucide-react"
 
 export default function ChatView({ settings = { useBrowserTTS: false, useBrowserSTT: false } }) {
 	const [messages, setMessages] = useState([
@@ -13,6 +13,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	const [isRecording, setIsRecording] = useState(false)
 	const [playingIndex, setPlayingIndex] = useState(null)
 	const [audioLoadingIndex, setAudioLoadingIndex] = useState(null)
+	const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false)
 
 	const messagesEndRef = useRef(null)
 	const speechRecRef = useRef(null)
@@ -24,6 +25,115 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	const audioCacheRef = useRef({})
 	const committedTextRef = useRef("")
 	const streamWsRef = useRef(null)
+
+	// Streaming Audio Playback Refs
+	const playAudioContextRef = useRef(null)
+	const currentSourceRef = useRef(null)
+	const audioQueueRef = useRef([])
+	const isAudioQueuePlayingRef = useRef(false)
+	const browserTtsQueueRef = useRef([])
+	const isBrowserTtsPlayingRef = useRef(false)
+
+	const stopStreamingAudio = () => {
+		audioQueueRef.current = []
+		browserTtsQueueRef.current = []
+		if (window.speechSynthesis) {
+			window.speechSynthesis.cancel()
+		}
+		if (currentSourceRef.current) {
+			try {
+				currentSourceRef.current.onended = null
+				currentSourceRef.current.stop()
+				currentSourceRef.current.disconnect()
+			} catch (e) {}
+			currentSourceRef.current = null
+		}
+		isAudioQueuePlayingRef.current = false
+		isBrowserTtsPlayingRef.current = false
+		setIsAssistantSpeaking(false)
+	}
+
+	const playNextAudioChunk = async () => {
+		if (audioQueueRef.current.length === 0) {
+			isAudioQueuePlayingRef.current = false
+			setIsAssistantSpeaking(false)
+			return
+		}
+
+		isAudioQueuePlayingRef.current = true
+		setIsAssistantSpeaking(true)
+
+		const base64Audio = audioQueueRef.current.shift()
+		try {
+			let playCtx = playAudioContextRef.current
+			if (!playCtx || playCtx.state === "closed") {
+				playCtx = new (window.AudioContext || window.webkitAudioContext)()
+				playAudioContextRef.current = playCtx
+			}
+
+			if (playCtx.state === "suspended") {
+				await playCtx.resume()
+			}
+
+			const binaryString = atob(base64Audio)
+			const len = binaryString.length
+			const bytes = new Uint8Array(len)
+			for (let i = 0; i < len; i++) {
+				bytes[i] = binaryString.charCodeAt(i)
+			}
+
+			const audioBuffer = await playCtx.decodeAudioData(bytes.buffer.slice(0))
+			const source = playCtx.createBufferSource()
+			source.buffer = audioBuffer
+			source.connect(playCtx.destination)
+			currentSourceRef.current = source
+
+			source.onended = () => {
+				currentSourceRef.current = null
+				playNextAudioChunk()
+			}
+
+			source.start(0)
+		} catch (err) {
+			console.error("Failed to process audio chunk:", err)
+			playNextAudioChunk()
+		}
+	}
+
+	const enqueueAudioChunk = (base64Audio) => {
+		audioQueueRef.current.push(base64Audio)
+		if (!isAudioQueuePlayingRef.current) {
+			playNextAudioChunk()
+		}
+	}
+
+	const playNextBrowserTts = () => {
+		if (browserTtsQueueRef.current.length === 0) {
+			isBrowserTtsPlayingRef.current = false
+			setIsAssistantSpeaking(false)
+			return
+		}
+
+		isBrowserTtsPlayingRef.current = true
+		setIsAssistantSpeaking(true)
+		const text = browserTtsQueueRef.current.shift()
+		const utterance = new SpeechSynthesisUtterance(text)
+		utterance.lang = "es-ES"
+		utterance.onend = () => {
+			playNextBrowserTts()
+		}
+		utterance.onerror = () => {
+			playNextBrowserTts()
+		}
+		window.speechSynthesis?.speak(utterance)
+	}
+
+	const enqueueBrowserTts = (text) => {
+		browserTtsQueueRef.current.push(text)
+		if (!isBrowserTtsPlayingRef.current) {
+			playNextBrowserTts()
+		}
+	}
 
 	useEffect(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -58,11 +168,23 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	}
 
 	const handleSend = async (textToSend) => {
+		stopStreamingAudio()
 		if (isRecording) {
 			stopVoiceRecording()
 		}
 		const text = (textToSend || input).trim()
 		if (!text || isLoading) return
+
+		if (!settings.useBrowserTTS) {
+			try {
+				if (!playAudioContextRef.current || playAudioContextRef.current.state === "closed") {
+					playAudioContextRef.current = new (window.AudioContext || window.webkitAudioContext)()
+				}
+				if (playAudioContextRef.current.state === "suspended") {
+					playAudioContextRef.current.resume()
+				}
+			} catch (e) {}
+		}
 
 		const newHistory = [...messages, { role: "user", content: text }]
 		setMessages(newHistory)
@@ -76,7 +198,10 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 			streamWsRef.current = ws
 
 			ws.onopen = () => {
-				ws.send(JSON.stringify({ messages: newHistory }))
+				ws.send(JSON.stringify({
+					messages: newHistory,
+					tts_mode: settings.useBrowserTTS ? "browser" : "rpi5"
+				}))
 			}
 
 			let accumulatedText = ""
@@ -94,6 +219,10 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								return [...prev, { role: "assistant", content: accumulatedText }]
 							}
 						})
+					} else if (data.type === "audio_chunk" && data.audio_base64) {
+						enqueueAudioChunk(data.audio_base64)
+					} else if (data.type === "tts_sentence" && data.text) {
+						enqueueBrowserTts(data.text)
 					} else if (data.type === "done") {
 						setIsLoading(false)
 						try { ws.close() } catch (e) {}
@@ -201,6 +330,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	}
 
 	const startVoiceRecording = async () => {
+		stopStreamingAudio()
 		committedTextRef.current = input ? input.trim() + " " : ""
 		if (settings.useBrowserSTT) {
 			const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -346,6 +476,11 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	useEffect(() => {
 		return () => {
 			stopVoiceRecording()
+			stopStreamingAudio()
+			if (playAudioContextRef.current) {
+				try { playAudioContextRef.current.close() } catch (e) {}
+				playAudioContextRef.current = null
+			}
 			if (streamWsRef.current) {
 				try { streamWsRef.current.close() } catch (e) {}
 				streamWsRef.current = null
@@ -384,29 +519,40 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								)}
 							</p>
 
-							{msg.role === "assistant" && (!isLoading || index !== messages.length - 1) && (
+							{msg.role === "assistant" && (
 								<div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center gap-2">
-									<button
-										onClick={() => handlePlayTTS(msg.content, index)}
-										disabled={audioLoadingIndex === index}
-										className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-colors"
-										title="Play response audio"
-									>
-										{audioLoadingIndex === index ? (
-											<Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
-										) : playingIndex === index ? (
-											<Pause className="w-3.5 h-3.5 text-sky-400" />
-										) : (
-											<Volume2 className="w-3.5 h-3.5" />
-										)}
-										<span>
-											{audioLoadingIndex === index
-												? "Generating..."
-												: playingIndex === index
-												? "Pause"
-												: "Listen"}
-										</span>
-									</button>
+									{isAssistantSpeaking && index === messages.length - 1 ? (
+										<button
+											onClick={stopStreamingAudio}
+											className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-rose-600/20 text-rose-400 border border-rose-500/40 hover:bg-rose-600/30 transition-colors animate-pulse"
+											title="Silenciar voz del asistente"
+										>
+											<VolumeX className="w-3.5 h-3.5" />
+											<span>Silenciar</span>
+										</button>
+									) : (!isLoading || index !== messages.length - 1) && (
+										<button
+											onClick={() => handlePlayTTS(msg.content, index)}
+											disabled={audioLoadingIndex === index}
+											className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-colors"
+											title="Play response audio"
+										>
+											{audioLoadingIndex === index ? (
+												<Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+											) : playingIndex === index ? (
+												<Pause className="w-3.5 h-3.5 text-sky-400" />
+											) : (
+												<Volume2 className="w-3.5 h-3.5" />
+											)}
+											<span>
+												{audioLoadingIndex === index
+													? "Generating..."
+													: playingIndex === index
+													? "Pause"
+													: "Listen"}
+											</span>
+										</button>
+									)}
 								</div>
 							)}
 						</div>

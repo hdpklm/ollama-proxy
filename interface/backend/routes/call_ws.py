@@ -330,8 +330,10 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 	await websocket.accept()
 	current_stream_task: asyncio.Task | None = None
 
-	async def stream_tokens(messages: list, model: str):
+	async def stream_tokens(messages: list, model: str, tts_mode: str = "rpi5"):
 		accumulated = ""
+		chunker = SentenceChunker(min_words=2, max_words=20)
+		chunk_index = 0
 		try:
 			async for token in llm_service.stream_chat(messages, model=model):
 				accumulated += token
@@ -339,6 +341,47 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 					"type": "token",
 					"token": token
 				})
+
+				sentences = chunker.push_token(token)
+				for sentence in sentences:
+					chunk_index += 1
+					if tts_mode == "rpi5":
+						audio_bytes = await tts_service.synthesize(sentence)
+						if audio_bytes:
+							b64_audio = base64.b64encode(audio_bytes).decode("ascii")
+							await websocket.send_json({
+								"type": "audio_chunk",
+								"chunk_index": chunk_index,
+								"audio_base64": b64_audio,
+								"text": sentence
+							})
+					else:
+						await websocket.send_json({
+							"type": "tts_sentence",
+							"chunk_index": chunk_index,
+							"text": sentence
+						})
+
+			final_sentences = chunker.flush()
+			for sentence in final_sentences:
+				chunk_index += 1
+				if tts_mode == "rpi5":
+					audio_bytes = await tts_service.synthesize(sentence)
+					if audio_bytes:
+						b64_audio = base64.b64encode(audio_bytes).decode("ascii")
+						await websocket.send_json({
+							"type": "audio_chunk",
+							"chunk_index": chunk_index,
+							"audio_base64": b64_audio,
+							"text": sentence
+						})
+				else:
+					await websocket.send_json({
+						"type": "tts_sentence",
+						"chunk_index": chunk_index,
+						"text": sentence
+					})
+
 			await websocket.send_json({
 				"type": "done",
 				"full_text": accumulated
@@ -363,8 +406,9 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 					current_stream_task.cancel()
 				messages = data.get("messages", [])
 				model = data.get("model", settings.LLM_MODEL)
+				tts_mode = data.get("tts_mode", "rpi5")
 				if messages:
-					current_stream_task = asyncio.create_task(stream_tokens(messages, model))
+					current_stream_task = asyncio.create_task(stream_tokens(messages, model, tts_mode))
 			elif msg_type == "stop":
 				if current_stream_task and not current_stream_task.done():
 					current_stream_task.cancel()

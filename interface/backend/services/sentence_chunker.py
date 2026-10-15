@@ -2,11 +2,11 @@ import re
 from typing import AsyncGenerator
 
 class SentenceChunker:
-	def __init__(self, min_words: int = 3, max_words: int = 25):
+	def __init__(self, min_words: int = 2, max_words: int = 25):
 		self.min_words = min_words
 		self.max_words = max_words
 		self.buffer = ""
-		self.delimiters = re.compile(r'([.!?:\n]+)')
+		self.delimiters = re.compile(r'([.!?,;:\n]+)')
 
 	def push_token(self, token: str) -> list[str]:
 		self.buffer += token
