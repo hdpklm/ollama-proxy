@@ -241,3 +241,86 @@ async def websocket_call_endpoint(websocket: WebSocket):
 			except Exception:
 				pass
 			vosk_ws = None
+
+@router.websocket("/ws/stt")
+async def websocket_stt_endpoint(websocket: WebSocket):
+	await websocket.accept()
+
+	vosk_ws_url = settings.STT_URL.replace("http://", "ws://").replace("https://", "wss://").rstrip("/") + "/ws"
+	vosk_ws = None
+	vosk_task: asyncio.Task | None = None
+
+	async def listen_vosk():
+		nonlocal vosk_ws
+		try:
+			async for msg_str in vosk_ws:
+				data = json.loads(msg_str)
+				is_final = bool(data.get("is_final", False))
+				text = data.get("text", "") if is_final else data.get("partial", "")
+				text = text.strip()
+				if text:
+					await websocket.send_json({
+						"type": "transcript",
+						"text": text,
+						"is_final": is_final
+					})
+		except (asyncio.CancelledError, websockets.ConnectionClosed):
+			pass
+		except Exception as e:
+			print(f"[WS STT] Vosk listen error: {e}")
+		finally:
+			vosk_ws = None
+
+	async def ensure_vosk():
+		nonlocal vosk_ws, vosk_task
+		if vosk_ws is None:
+			try:
+				vosk_ws = await websockets.connect(vosk_ws_url, ping_interval=20, ping_timeout=20)
+				vosk_task = asyncio.create_task(listen_vosk())
+				print(f"[WS STT] Connected to Vosk streaming at {vosk_ws_url}")
+			except Exception as e:
+				print(f"[WS STT] Warning: Could not connect to Vosk WS ({vosk_ws_url}): {e}")
+				vosk_ws = None
+		return vosk_ws
+
+	await ensure_vosk()
+
+	try:
+		while True:
+			message = await websocket.receive()
+			msg_type_raw = message.get("type")
+			if msg_type_raw == "websocket.disconnect":
+				break
+
+			if "bytes" in message and message["bytes"]:
+				pcm_data = message["bytes"]
+				conn = await ensure_vosk()
+				if conn:
+					try:
+						await conn.send(pcm_data)
+					except Exception as send_err:
+						print(f"[WS STT] Vosk send error: {send_err}")
+						vosk_ws = None
+
+			elif "text" in message and message["text"]:
+				if message["text"] in ('{"eof": 1}', 'stop'):
+					conn = await ensure_vosk()
+					if conn:
+						try:
+							await conn.send('{"eof" : 1}')
+						except Exception:
+							pass
+
+	except WebSocketDisconnect:
+		pass
+	except Exception as e:
+		print(f"[WS STT Error] Unexpected exception: {e}")
+	finally:
+		if vosk_task and not vosk_task.done():
+			vosk_task.cancel()
+		if vosk_ws:
+			try:
+				await vosk_ws.close()
+			except Exception:
+				pass
+			vosk_ws = None

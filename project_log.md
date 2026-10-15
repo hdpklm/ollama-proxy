@@ -643,3 +643,15 @@
 - **Solución**:
 	- Sustituida la comprobación por un método seguro `ensure_vosk()` con reconexión perezosa y captura explícita de excepciones en el envío `conn.send(pcm_data)`.
 	- En el bloque `finally:`, asegurado el cierre de `vosk_ws` mediante comprobación de existencia y bloque `try/except`.
+
+### 📝 Registro: [v0.7.34] - Dictado por voz WebSocket en tiempo real en la vista de Chat
+- **date-time**: 2026-10-15 22:58:00
+- **Problema**:
+	- Al pulsar el micrófono en la vista de chat con Vosk, siempre devolvía `{"text":""}` y auto-enviaba sin permitir al usuario revisar ni corregir lo hablado.
+- **Causa**:
+	- `ChatView.jsx` utilizaba `MediaRecorder` empaquetando audio WebM/Opus en un Blob etiquetado erróneamente como WAV hacia `/api/stt`, lo que provocaba fallo de decodificación en Kaldi de Vosk. Además, auto-enviaba el mensaje inmediatamente en vez de volcarlo al input de texto.
+- **Solución**:
+	- Implementado endpoint WebSocket `/ws/stt` en `call_ws.py` que reenvía PCM16 continuo a Vosk y emite transcripciones parciales y finales.
+	- Refactorizado `ChatView.jsx` para transmitir PCM16 vía WebSocket a `/ws/stt` (o usar `SpeechRecognition` con `interimResults = true`) y volcar el texto transcrito directamente en el campo `input` en tiempo real.
+	- Eliminado el auto-envío forzado: el usuario puede revisar, editar y enviar manualmente el texto dictado.
+	- Recompilado el frontend con `pnpm build`.

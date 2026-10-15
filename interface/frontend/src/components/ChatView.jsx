@@ -15,9 +15,11 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	const [audioLoadingIndex, setAudioLoadingIndex] = useState(null)
 
 	const messagesEndRef = useRef(null)
-	const mediaRecorderRef = useRef(null)
 	const speechRecRef = useRef(null)
-	const audioChunksRef = useRef([])
+	const chatWsRef = useRef(null)
+	const chatMicStreamRef = useRef(null)
+	const chatMicContextRef = useRef(null)
+	const chatProcessorRef = useRef(null)
 	const currentAudioRef = useRef(null)
 	const audioCacheRef = useRef({})
 
@@ -132,19 +134,28 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 		if (settings.useBrowserSTT) {
 			const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition
 			if (!SpeechRec) {
-				console.warn("SpeechRecognition not supported in browser, fallback needed")
+				alert("Tu navegador no soporta SpeechRecognition nativo.")
 				return
 			}
 			try {
 				const rec = new SpeechRec()
 				rec.lang = "es-ES"
-				rec.interimResults = false
+				rec.continuous = true
+				rec.interimResults = true
 				rec.onresult = (e) => {
-					const transcript = e.results[0]?.[0]?.transcript
-					if (transcript) handleSend(transcript)
+					let fullTranscript = ""
+					for (let i = 0; i < e.results.length; ++i) {
+						fullTranscript += e.results[i][0].transcript
+					}
+					if (fullTranscript.trim()) {
+						setInput(fullTranscript.trim())
+					}
 				}
 				rec.onend = () => setIsRecording(false)
-				rec.onerror = () => setIsRecording(false)
+				rec.onerror = (err) => {
+					console.error("SpeechRec error:", err)
+					setIsRecording(false)
+				}
 				speechRecRef.current = rec
 				rec.start()
 				setIsRecording(true)
@@ -155,58 +166,111 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 		}
 
 		try {
-			const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-			mediaRecorderRef.current = new MediaRecorder(stream)
-			audioChunksRef.current = []
+			const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+			const wsUrl = `${protocol}//${window.location.host}/ws/stt`
+			const ws = new WebSocket(wsUrl)
+			chatWsRef.current = ws
 
-			mediaRecorderRef.current.ondataavailable = (e) => {
-				if (e.data.size > 0) {
-					audioChunksRef.current.push(e.data)
+			const stream = await navigator.mediaDevices.getUserMedia({
+				audio: {
+					echoCancellation: true,
+					noiseSuppression: true,
+					autoGainControl: true
+				}
+			})
+			chatMicStreamRef.current = stream
+
+			const micCtx = new (window.AudioContext || window.webkitAudioContext)({
+				sampleRate: 16000
+			})
+			chatMicContextRef.current = micCtx
+
+			const source = micCtx.createMediaStreamSource(stream)
+			const processor = micCtx.createScriptProcessor(4096, 1, 1)
+			chatProcessorRef.current = processor
+
+			const silentGain = micCtx.createGain()
+			silentGain.gain.value = 0
+
+			source.connect(processor)
+			processor.connect(silentGain)
+			silentGain.connect(micCtx.destination)
+
+			processor.onaudioprocess = (e) => {
+				const inputData = e.inputBuffer.getChannelData(0)
+				const pcm16 = new Int16Array(inputData.length)
+				for (let i = 0; i < inputData.length; i++) {
+					const s = Math.max(-1, Math.min(1, inputData[i]))
+					pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff
+				}
+				if (ws.readyState === WebSocket.OPEN) {
+					ws.send(pcm16.buffer)
 				}
 			}
 
-			mediaRecorderRef.current.onstop = async () => {
-				const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" })
-				stream.getTracks().forEach((track) => track.stop())
-
-				setIsLoading(true)
+			ws.onmessage = (event) => {
 				try {
-					const formData = new FormData()
-					formData.append("file", audioBlob, "voice.wav")
-					const res = await fetch("/api/stt", {
-						method: "POST",
-						body: formData
-					})
-					if (!res.ok) throw new Error("STT error")
-					const data = await res.json()
-					if (data.text && data.text.trim()) {
-						handleSend(data.text.trim())
+					const data = json.loads ? JSON.parse(event.data) : JSON.parse(event.data)
+					if (data.type === "transcript" && data.text) {
+						setInput(data.text)
 					}
-				} catch (err) {
-					console.error("Voice STT error:", err)
-				} finally {
-					setIsLoading(false)
-				}
+				} catch (e) {}
 			}
 
-			mediaRecorderRef.current.start()
+			ws.onerror = (err) => {
+				console.error("[Chat STT WS error]", err)
+				stopVoiceRecording()
+			}
+
+			ws.onclose = () => {
+				setIsRecording(false)
+			}
+
 			setIsRecording(true)
 		} catch (err) {
 			console.error("Microphone access denied:", err)
+			alert("Error al acceder al micrófono: " + (err.message || err.name))
+			stopVoiceRecording()
 		}
 	}
 
 	const stopVoiceRecording = () => {
-		if (settings.useBrowserSTT && speechRecRef.current) {
-			speechRecRef.current.stop()
-			setIsRecording(false)
-			return
+		setIsRecording(false)
+		if (speechRecRef.current) {
+			try {
+				speechRecRef.current.onend = null
+				speechRecRef.current.stop()
+			} catch (e) {}
+			speechRecRef.current = null
 		}
-		if (mediaRecorderRef.current && isRecording) {
-			mediaRecorderRef.current.stop()
-			setIsRecording(false)
+		if (chatProcessorRef.current) {
+			try { chatProcessorRef.current.disconnect() } catch (e) {}
+			chatProcessorRef.current = null
+		}
+		if (chatMicContextRef.current) {
+			try { chatMicContextRef.current.close() } catch (e) {}
+			chatMicContextRef.current = null
+		}
+		if (chatMicStreamRef.current) {
+			try { chatMicStreamRef.current.getTracks().forEach((t) => t.stop()) } catch (e) {}
+			chatMicStreamRef.current = null
+		}
+		if (chatWsRef.current) {
+			try {
+				if (chatWsRef.current.readyState === WebSocket.OPEN) {
+					chatWsRef.current.send(JSON.stringify({ type: "stop" }))
+				}
+				chatWsRef.current.close()
+			} catch (e) {}
+			chatWsRef.current = null
 		}
 	}
+
+	useEffect(() => {
+		return () => {
+			stopVoiceRecording()
+		}
+	}, [])
 
 	return (
 		<div className="flex flex-col h-full max-w-3xl mx-auto px-4 py-4">
@@ -310,8 +374,8 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 						type="text"
 						value={input}
 						onChange={(e) => setInput(e.target.value)}
-						placeholder={isRecording ? "Recording voice..." : "Type your message..."}
-						disabled={isLoading || isRecording}
+						placeholder={isRecording ? "Escuchando tu voz..." : "Escribe tu mensaje..."}
+						disabled={isLoading}
 						className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
 					/>
 
