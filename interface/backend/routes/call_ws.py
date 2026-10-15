@@ -324,3 +324,54 @@ async def websocket_stt_endpoint(websocket: WebSocket):
 			except Exception:
 				pass
 			vosk_ws = None
+
+@router.websocket("/ws/chat")
+async def websocket_chat_endpoint(websocket: WebSocket):
+	await websocket.accept()
+	current_stream_task: asyncio.Task | None = None
+
+	async def stream_tokens(messages: list, model: str):
+		accumulated = ""
+		try:
+			async for token in llm_service.stream_chat(messages, model=model):
+				accumulated += token
+				await websocket.send_json({
+					"type": "token",
+					"token": token
+				})
+			await websocket.send_json({
+				"type": "done",
+				"full_text": accumulated
+			})
+		except asyncio.CancelledError:
+			pass
+		except Exception as e:
+			try:
+				await websocket.send_json({
+					"type": "error",
+					"message": str(e)
+				})
+			except Exception:
+				pass
+
+	try:
+		while True:
+			data = await websocket.receive_json()
+			msg_type = data.get("type", "chat")
+			if msg_type in ("chat", "send") or "messages" in data:
+				if current_stream_task and not current_stream_task.done():
+					current_stream_task.cancel()
+				messages = data.get("messages", [])
+				model = data.get("model", settings.LLM_MODEL)
+				if messages:
+					current_stream_task = asyncio.create_task(stream_tokens(messages, model))
+			elif msg_type == "stop":
+				if current_stream_task and not current_stream_task.done():
+					current_stream_task.cancel()
+	except WebSocketDisconnect:
+		pass
+	except Exception as e:
+		print(f"[WS Chat Error] {e}")
+	finally:
+		if current_stream_task and not current_stream_task.done():
+			current_stream_task.cancel()

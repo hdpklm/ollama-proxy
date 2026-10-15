@@ -674,3 +674,14 @@
 - **Solución**:
 	- En `interface/frontend/src/components/ChatView.jsx`, se agregó la llamada a `stopVoiceRecording()` en `handleSend` y en `onSubmit` si `isRecording` está activo, deteniendo inmediatamente el micrófono y cerrando el WebSocket de transcripción al enviar.
 	- Recompilado el frontend con `pnpm build`.
+
+### 📝 Registro: [v0.7.37] - Streaming WebSocket token a token en la vista de Chat
+- **date-time**: 2026-10-15 23:31:45
+- **Problema**:
+	- En la vista de chat, las respuestas del modelo LLM se solicitaban mediante HTTP POST síncrono (`/api/chat`), obligando al usuario a esperar que la respuesta completa terminara de generarse antes de mostrar todo de golpe.
+- **Causa**:
+	- `handleSend` esperaba la resolución de `await res.json()` en vez de consumir un flujo por WebSocket o Server-Sent Events.
+- **Solución**:
+	- En `interface/backend/routes/call_ws.py`, se implementó el endpoint WebSocket `@router.websocket("/ws/chat")` que envía eventos `{ "type": "token", "token": str }` en streaming a medida que el LLM genera cada token, culminando con `{ "type": "done", "full_text": str }`.
+	- En `interface/frontend/src/components/ChatView.jsx`, se refactorizó `handleSend` para conectarse a `/ws/chat`, mostrando el bocadillo de respuesta con actualización progresiva en tiempo real y cursor pulsante, con fallback transparente a HTTP ante caídas de red.
+	- Documentado el endpoint en `project_status.md` y recompilado el frontend con `pnpm build`.

@@ -1,4 +1,4 @@
-# Project Status - Ollama Priority Proxy v0.7.36
+# Project Status - Ollama Priority Proxy v0.7.37
 
 ## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Interface Voice/Chat Module (PWA) + Standalone TTS/STT Services
 Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, modulo desacoplado de interfaz web PWA instalable en Android/navegador (React + Vite + Tailwind + Service Worker + Manifest), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS), microservicios independientes para Piper TTS y Vosk STT, y scripts desacoplados de compilacion local (`build.bat`) y transferencia directa SSH (`send.bat`).
@@ -16,7 +16,7 @@ Proxy HTTP y planificador de tokens por turno estricto con contextos KV independ
 - `main.py`: Inicializa la aplicacion FastAPI del modulo interface, monta rutas REST/WebSocket y sirve los estaticos compilados de `frontend/dist`.
 - `config.py`: Centraliza variables de entorno para endpoints externos de LLM, STT, TTS y puerto del servidor.
 - `routes/chat.py`: Endpoints REST para interaccion asincrona en modo chat (envio de texto, audio con reproduccion y sintesis).
-- `routes/call_ws.py`: Handlers WebSocket para llamadas de voz (/ws/call) y dictado STT en streaming (/ws/stt) conectados a Vosk con subtitulos parciales en vivo.
+- `routes/call_ws.py`: Handlers WebSocket para llamadas de voz (/ws/call), dictado STT en streaming (/ws/stt) y generacion token a token de chat (/ws/chat).
 - `services/llm_client.py`: Cliente asincrono HTTP/streaming hacia el proxy LLM.
 - `services/stt_client.py`: Cliente de transcripcion hacia Vosk (HTTP/WebSocket).
 - `services/tts_client.py`: Cliente de sintesis de voz hacia Piper.
@@ -87,3 +87,9 @@ Proxy HTTP y planificador de tokens por turno estricto con contextos KV independ
 - `[WS] /ws/call` [Auth: None / Public]:
 	- **Payload Bidireccional**: Binario PCM/WAV (audio microfono) o JSON `{ type: "audio" | "transcript" | "tts_chunk" | "status" | "interrupt" }`
 	- **Descripcion**: Canal interactivo bidireccional de baja latencia para llamadas de voz con VAD (700ms), streaming LLM y sintesis de frases.
+- `[WS] /ws/stt` [Auth: None / Public]:
+	- **Payload Bidireccional**: Binario PCM16 (audio microfono) -> JSON `{ type: "transcript", text: str, is_final: bool }`
+	- **Descripcion**: Streaming continuo de audio hacia Vosk para transcripcion y dictado en vivo en el campo de entrada.
+- `[WS] /ws/chat` [Auth: None / Public]:
+	- **Payload Bidireccional**: JSON `{ messages: list, model: str (opcional) }` -> Tokens SSE/JSON `{ type: "token", token: str }` y `{ type: "done", full_text: str }`.
+	- **Descripcion**: Generacion token a token mediante WebSocket para visualizacion progresiva en tiempo real en la interfaz de chat.

@@ -23,10 +23,39 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	const currentAudioRef = useRef(null)
 	const audioCacheRef = useRef({})
 	const committedTextRef = useRef("")
+	const streamWsRef = useRef(null)
 
 	useEffect(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
 	}, [messages, isLoading])
+
+	const fallbackFetchChat = async (history) => {
+		try {
+			const res = await fetch("/api/chat", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ messages: history })
+			})
+			if (!res.ok) throw new Error("Failed to contact LLM")
+			const data = await res.json()
+			const assistantContent = data.message?.content || data.response || "No response"
+			setMessages((prev) => {
+				const last = prev[prev.length - 1]
+				if (last && last.role === "assistant") {
+					return [...prev.slice(0, -1), { role: "assistant", content: assistantContent }]
+				}
+				return [...prev, { role: "assistant", content: assistantContent }]
+			})
+		} catch (err) {
+			console.error("Chat error:", err)
+			setMessages((prev) => [
+				...prev,
+				{ role: "assistant", content: "Error al comunicarse con el modelo." }
+			])
+		} finally {
+			setIsLoading(false)
+		}
+	}
 
 	const handleSend = async (textToSend) => {
 		if (isRecording) {
@@ -41,24 +70,61 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 		setIsLoading(true)
 
 		try {
-			const res = await fetch("/api/chat", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ messages: newHistory })
-			})
-			if (!res.ok) throw new Error("Failed to contact LLM")
-			const data = await res.json()
-			const assistantContent = data.message?.content || data.response || "No response"
+			const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+			const wsUrl = `${protocol}//${window.location.host}/ws/chat`
+			const ws = new WebSocket(wsUrl)
+			streamWsRef.current = ws
 
-			setMessages([...newHistory, { role: "assistant", content: assistantContent }])
+			ws.onopen = () => {
+				ws.send(JSON.stringify({ messages: newHistory }))
+			}
+
+			let accumulatedText = ""
+
+			ws.onmessage = (event) => {
+				try {
+					const data = JSON.parse(event.data)
+					if (data.type === "token" && data.token) {
+						accumulatedText += data.token
+						setMessages((prev) => {
+							const last = prev[prev.length - 1]
+							if (last && last.role === "assistant") {
+								return [...prev.slice(0, -1), { ...last, content: accumulatedText }]
+							} else {
+								return [...prev, { role: "assistant", content: accumulatedText }]
+							}
+						})
+					} else if (data.type === "done") {
+						setIsLoading(false)
+						try { ws.close() } catch (e) {}
+						streamWsRef.current = null
+					} else if (data.type === "error") {
+						console.error("Chat WS stream error:", data.message)
+						setMessages((prev) => [
+							...prev,
+							{ role: "assistant", content: `Error: ${data.message}` }
+						])
+						setIsLoading(false)
+						try { ws.close() } catch (e) {}
+						streamWsRef.current = null
+					}
+				} catch (e) {
+					console.error("WS chat parse error:", e)
+				}
+			}
+
+			ws.onerror = (err) => {
+				console.error("Chat WS error, falling back to HTTP:", err)
+				fallbackFetchChat(newHistory)
+			}
+
+			ws.onclose = () => {
+				setIsLoading(false)
+				streamWsRef.current = null
+			}
 		} catch (err) {
-			console.error("Chat error:", err)
-			setMessages([
-				...newHistory,
-				{ role: "assistant", content: "Error al comunicarse con el modelo." }
-			])
-		} finally {
-			setIsLoading(false)
+			console.error("Error creating chat WS:", err)
+			fallbackFetchChat(newHistory)
 		}
 	}
 
@@ -280,6 +346,10 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	useEffect(() => {
 		return () => {
 			stopVoiceRecording()
+			if (streamWsRef.current) {
+				try { streamWsRef.current.close() } catch (e) {}
+				streamWsRef.current = null
+			}
 		}
 	}, [])
 
@@ -307,9 +377,14 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 									: "bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none"
 							}`}
 						>
-							<p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+							<p className="text-sm leading-relaxed whitespace-pre-wrap">
+								{msg.content}
+								{isLoading && index === messages.length - 1 && msg.role === "assistant" && (
+									<span className="inline-block w-1.5 h-4 ml-1 bg-sky-400 animate-pulse align-middle" />
+								)}
+							</p>
 
-							{msg.role === "assistant" && (
+							{msg.role === "assistant" && (!isLoading || index !== messages.length - 1) && (
 								<div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center gap-2">
 									<button
 										onClick={() => handlePlayTTS(msg.content, index)}
@@ -344,7 +419,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 					</div>
 				))}
 
-				{isLoading && (
+				{isLoading && (!messages.length || messages[messages.length - 1].role === "user") && (
 					<div className="flex items-center gap-3">
 						<div className="w-8 h-8 rounded-full bg-sky-600/20 border border-sky-500/40 flex items-center justify-center text-sky-400">
 							<Bot className="w-4 h-4" />
