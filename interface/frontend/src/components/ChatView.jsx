@@ -29,6 +29,9 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	}, [messages, isLoading])
 
 	const handleSend = async (textToSend) => {
+		if (isRecording) {
+			stopVoiceRecording()
+		}
 		const text = (textToSend || input).trim()
 		if (!text || isLoading) return
 
@@ -361,6 +364,9 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 				<form
 					onSubmit={(e) => {
 						e.preventDefault()
+						if (isRecording) {
+							stopVoiceRecording()
+						}
 						handleSend()
 					}}
 					className="flex items-center gap-2"

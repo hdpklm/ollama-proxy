@@ -664,3 +664,13 @@
 	- En `ChatView.jsx`, la función `ws.onmessage` contenía una referencia errónea a `json.loads` en código JavaScript (`json.loads ? JSON.parse(...)`), provocando un `ReferenceError: json is not defined` capturado silenciosamente en el bloque `catch`.
 - **Solución**:
 	- `interface/frontend/src/components/ChatView.jsx`: sustituido por `JSON.parse(event.data)`, añadido `committedTextRef` para acumular frases continuas y parciales sin sobrescribir texto previo en el input, y reconstruido el frontend con `pnpm build`.
+
+### 📝 Registro: [v0.7.36] - Detener grabación de voz al enviar mensaje en ChatView
+- **date-time**: 2026-10-15 23:27:50
+- **Problema**:
+	- Al pulsar el botón de enviar o pulsar Enter mientras se está grabando audio para transcripción, la grabación continuaba activa en lugar de finalizarse automáticamente.
+- **Causa**:
+	- `handleSend` y el evento `onSubmit` del formulario no invocaban `stopVoiceRecording()` al despachar el mensaje.
+- **Solución**:
+	- En `interface/frontend/src/components/ChatView.jsx`, se agregó la llamada a `stopVoiceRecording()` en `handleSend` y en `onSubmit` si `isRecording` está activo, deteniendo inmediatamente el micrófono y cerrando el WebSocket de transcripción al enviar.
+	- Recompilado el frontend con `pnpm build`.
