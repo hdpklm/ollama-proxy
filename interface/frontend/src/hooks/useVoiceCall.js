@@ -316,7 +316,9 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 							stopCurrentAudioPlayback()
 						}
 						setUserTranscript(msg.text)
-						setCallHistory((prev) => [...prev, { role: "user", text: msg.text }])
+						if (msg.is_final !== false) {
+							setCallHistory((prev) => [...prev, { role: "user", text: msg.text }])
+						}
 					} else if (msg.type === "assistant_thinking") {
 						setAssistantText("...")
 					} else if (msg.type === "assistant_token") {

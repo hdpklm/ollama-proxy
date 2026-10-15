@@ -619,3 +619,17 @@
 	- Eliminadas las referencias y creación de `pc1`, `pc2`, `playStreamDest` y el elemento del DOM `webrtc-aec-speaker` en [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js).
 	- Enrutado el audio del asistente directamente a `playCtx.destination` en `playNextAudioChunk`.
 	- Recompilado el bundle con `pnpm build`.
+
+### 📝 Registro: [v0.7.32] - Conexión directa streaming a Vosk WebSocket con subtítulos parciales en vivo
+- **date-time**: 2026-10-15 22:27:00
+- **Problema**:
+	- Al activar Vosk en la llamada, el cliente enviaba paquetes de audio PCM16 por WebSocket pero el servidor nunca respondía ni transcribía.
+- **Causa**:
+	- En `call_ws.py`, un temporizador de silencio (`silence_timer_task`) se cancelaba y reiniciaba 4 veces por segundo con cada paquete entrante, impidiendo que el audio llegara a transcribirse. Además, no se aprovechaba el endpoint WebSocket nativo de Vosk ni se mostraba la transcripción parcial mientras el usuario hablaba.
+- **Solución**:
+	- Enlazado `call_ws.py` directamente con el endpoint WebSocket de Vosk (`ws://vosk-stt:2700/ws`).
+	- Implementado reenvío directo de PCM16 y escucha asíncrona de resultados de Vosk:
+	  - Emisión de `is_final: false` con texto parcial (`partial`) en tiempo real hacia el frontend para visualización inmediata en pantalla.
+	  - Emisión de `is_final: true` con texto finalizado para disparar la generación y respuesta del LLM.
+	- En `useVoiceCall.js`, actualizado el handler de `user_transcript` para refrescar `userTranscript` con parciales y agregar a `callHistory` únicamente al finalizar la frase.
+	- Recompilado el bundle de frontend con `pnpm build`.

@@ -1,4 +1,4 @@
-# Project Status - Ollama Priority Proxy v0.7.31
+# Project Status - Ollama Priority Proxy v0.7.32
 
 ## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Interface Voice/Chat Module (PWA) + Standalone TTS/STT Services
 Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, modulo desacoplado de interfaz web PWA instalable en Android/navegador (React + Vite + Tailwind + Service Worker + Manifest), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS), microservicios independientes para Piper TTS y Vosk STT, y scripts desacoplados de compilacion local (`build.bat`) y transferencia directa SSH (`send.bat`).
@@ -16,7 +16,7 @@ Proxy HTTP y planificador de tokens por turno estricto con contextos KV independ
 - `main.py`: Inicializa la aplicacion FastAPI del modulo interface, monta rutas REST/WebSocket y sirve los estaticos compilados de `frontend/dist`.
 - `config.py`: Centraliza variables de entorno para endpoints externos de LLM, STT, TTS y puerto del servidor.
 - `routes/chat.py`: Endpoints REST para interaccion asincrona en modo chat (envio de texto, audio con reproduccion y sintesis).
-- `routes/call_ws.py`: Handler WebSocket para llamadas de voz en tiempo real con soporte barge-in configurable, streaming al LLM y sintesis de audio segmentada por oraciones.
+- `routes/call_ws.py`: Handler WebSocket para llamadas de voz con puente WebSocket bidireccional en streaming hacia Vosk (subtitulos parciales en vivo y final), barge-in y sintesis segmentada.
 - `services/llm_client.py`: Cliente asincrono HTTP/streaming hacia el proxy LLM.
 - `services/stt_client.py`: Cliente de transcripcion hacia Vosk (HTTP/WebSocket).
 - `services/tts_client.py`: Cliente de sintesis de voz hacia Piper.
@@ -26,8 +26,8 @@ Proxy HTTP y planificador de tokens por turno estricto con contextos KV independ
 - `src/App.jsx`: Componente raiz con hash-routing para alternar entre modo Chat y modo Llamada y persistencia de settings de voz.
 - `src/components/SettingsModal.jsx`: Modal de configuracion para alternar TTS (Navegador/RPi5), STT (Navegador/RPi5) e interrupcion por voz (Barge-in on/off).
 - `src/components/ChatView.jsx`: Interfaz de mensajeria con envio de texto, grabacion de notas de voz y boton de reproduccion de audio asistencial.
-- `src/components/CallView.jsx`: Vista de llamada interactiva a pantalla completa con ondas de audio reactivas, estado de llamada y gestion de microfono en tiempo real.
-- `src/hooks/useVoiceCall.js`: Hook para gestion de canal WebSocket con salida directa de audio a playCtx.destination y cancelacion nativa de eco por hardware via getUserMedia ininterrumpido.
+- `src/components/CallView.jsx`: Vista de llamada interactiva a pantalla completa con ondas de audio reactivas, subtitulos parciales en vivo y gestion de microfono.
+- `src/hooks/useVoiceCall.js`: Hook para gestion de canal WebSocket con salida directa de audio a playCtx.destination, visualizacion en tiempo real de habla del usuario y cancelacion nativa de eco por hardware.
 
 ### `backend/config.py`
 - `config`: Gestiona variables de entorno, configuraciones de contexto/hilos y resolucion de rutas GGUF.
