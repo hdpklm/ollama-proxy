@@ -14,7 +14,13 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 	const micStreamRef = useRef(null)
 	const processorRef = useRef(null)
 	const speechRecRef = useRef(null)
-	const audioElementRef = useRef(null)
+
+	// WebRTC AEC loopback refs to feed speaker audio directly into Chrome's AEC reference pipeline
+	const playAudioContextRef = useRef(null)
+	const playStreamDestRef = useRef(null)
+	const peerConnection1Ref = useRef(null)
+	const peerConnection2Ref = useRef(null)
+	const currentSourceRef = useRef(null)
 
 	const isMutedRef = useRef(false)
 	const isInCallRef = useRef(false)
@@ -28,17 +34,19 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 			window.speechSynthesis?.cancel()
 		}
 		audioQueueRef.current = []
-		if (audioElementRef.current) {
+		if (currentSourceRef.current) {
 			try {
-				audioElementRef.current.pause()
-				audioElementRef.current.currentTime = 0
+				currentSourceRef.current.onended = null
+				currentSourceRef.current.stop()
+				currentSourceRef.current.disconnect()
 			} catch (e) {}
+			currentSourceRef.current = null
 		}
 		isPlayingRef.current = false
 		setIsAssistantSpeaking(false)
 	}, [settings])
 
-	const playNextAudioChunk = useCallback(() => {
+	const playNextAudioChunk = useCallback(async () => {
 		if (audioQueueRef.current.length === 0) {
 			isPlayingRef.current = false
 			setIsAssistantSpeaking(false)
@@ -50,6 +58,14 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 
 		const base64Audio = audioQueueRef.current.shift()
 		try {
+			const playCtx = playAudioContextRef.current
+			const dest = playStreamDestRef.current
+			if (!playCtx || !dest) return
+
+			if (playCtx.state === "suspended") {
+				await playCtx.resume()
+			}
+
 			const binaryString = atob(base64Audio)
 			const len = binaryString.length
 			const bytes = new Uint8Array(len)
@@ -57,33 +73,18 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 				bytes[i] = binaryString.charCodeAt(i)
 			}
 
-			const blob = new Blob([bytes], { type: "audio/wav" })
-			const audioUrl = URL.createObjectURL(blob)
+			const audioBuffer = await playCtx.decodeAudioData(bytes.buffer.slice(0))
+			const source = playCtx.createBufferSource()
+			source.buffer = audioBuffer
+			source.connect(dest)
+			currentSourceRef.current = source
 
-			if (!audioElementRef.current) {
-				audioElementRef.current = new Audio()
-				audioElementRef.current.playsInline = true
-			}
-
-			const audio = audioElementRef.current
-			audio.src = audioUrl
-
-			audio.onended = () => {
-				URL.revokeObjectURL(audioUrl)
+			source.onended = () => {
+				currentSourceRef.current = null
 				playNextAudioChunk()
 			}
 
-			audio.onerror = (e) => {
-				console.error("Audio playback error:", e)
-				URL.revokeObjectURL(audioUrl)
-				playNextAudioChunk()
-			}
-
-			audio.play().catch((err) => {
-				console.warn("Audio play() interrupted:", err)
-				URL.revokeObjectURL(audioUrl)
-				playNextAudioChunk()
-			})
+			source.start(0)
 		} catch (err) {
 			console.error("Failed to process audio chunk:", err)
 			playNextAudioChunk()
@@ -108,10 +109,26 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 		isInCallRef.current = false
 		stopCurrentAudioPlayback()
 
-		if (audioElementRef.current) {
+		if (peerConnection1Ref.current) {
+			try { peerConnection1Ref.current.close() } catch (e) {}
+			peerConnection1Ref.current = null
+		}
+		if (peerConnection2Ref.current) {
+			try { peerConnection2Ref.current.close() } catch (e) {}
+			peerConnection2Ref.current = null
+		}
+		if (playAudioContextRef.current) {
+			try { playAudioContextRef.current.close() } catch (e) {}
+			playAudioContextRef.current = null
+		}
+		playStreamDestRef.current = null
+
+		const audioElem = document.getElementById("webrtc-aec-speaker")
+		if (audioElem) {
 			try {
-				audioElementRef.current.pause()
-				audioElementRef.current.src = ""
+				audioElem.pause()
+				audioElem.srcObject = null
+				audioElem.remove()
 			} catch (e) {}
 		}
 
@@ -159,6 +176,52 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 		try {
 			setStatus("connecting")
 
+			// Initialize local WebRTC loopback audio output so Chrome AEC registers speaker sound as its reference signal
+			const playCtx = new (window.AudioContext || window.webkitAudioContext)()
+			playAudioContextRef.current = playCtx
+			if (playCtx.state === "suspended") {
+				await playCtx.resume()
+			}
+
+			const playDest = playCtx.createMediaStreamDestination()
+			playStreamDestRef.current = playDest
+
+			const pc1 = new RTCPeerConnection()
+			const pc2 = new RTCPeerConnection()
+			peerConnection1Ref.current = pc1
+			peerConnection2Ref.current = pc2
+
+			pc1.onicecandidate = (e) => {
+				if (e.candidate) pc2.addIceCandidate(e.candidate).catch(() => {})
+			}
+			pc2.onicecandidate = (e) => {
+				if (e.candidate) pc1.addIceCandidate(e.candidate).catch(() => {})
+			}
+
+			pc2.ontrack = (event) => {
+				let a = document.getElementById("webrtc-aec-speaker")
+				if (!a) {
+					a = document.createElement("audio")
+					a.id = "webrtc-aec-speaker"
+					a.autoplay = true
+					a.playsInline = true
+					document.body.appendChild(a)
+				}
+				a.srcObject = event.streams[0]
+				a.play().catch((err) => console.warn("AEC speaker play error:", err))
+			}
+
+			playDest.stream.getTracks().forEach((track) => {
+				pc1.addTrack(track, playDest.stream)
+			})
+
+			const offer = await pc1.createOffer()
+			await pc1.setLocalDescription(offer)
+			await pc2.setRemoteDescription(offer)
+			const answer = await pc2.createAnswer()
+			await pc2.setLocalDescription(answer)
+			await pc1.setRemoteDescription(answer)
+
 			let micStream = null
 			let micCtx = null
 			let processor = null
@@ -182,19 +245,18 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 					// Do not constrain sampleRate in getUserMedia as it breaks hardware AEC correlation
 					const constraints = {
 						audio: {
-							channelCount: 1,
 							echoCancellation: true,
 							noiseSuppression: true,
 							autoGainControl: true,
-							googEchoCancellation: true,
-							googAutoGainControl: true,
-							googNoiseSuppression: true,
-							googHighpassFilter: true
+							voiceIsolation: true
 						}
 					}
 
 					micStream = await navigator.mediaDevices.getUserMedia(constraints)
 					micStreamRef.current = micStream
+
+					const track = micStream.getAudioTracks()[0]
+					console.log("[VoiceCall] Microphone track settings:", track?.getSettings())
 
 					// Downsample cleaned, echo-cancelled audio to 16 kHz for Vosk
 					micCtx = new (window.AudioContext || window.webkitAudioContext)({
@@ -206,10 +268,20 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 					processor = micCtx.createScriptProcessor(4096, 1, 1)
 					processorRef.current = processor
 
+					// Normalization and speech leveling via DynamicsCompressorNode
+					const compressor = micCtx.createDynamicsCompressor()
+					compressor.threshold.setValueAtTime(-24, micCtx.currentTime)
+					compressor.knee.setValueAtTime(30, micCtx.currentTime)
+					compressor.ratio.setValueAtTime(12, micCtx.currentTime)
+					compressor.attack.setValueAtTime(0.003, micCtx.currentTime)
+					compressor.release.setValueAtTime(0.25, micCtx.currentTime)
+
 					// Route through a silent gain node so onaudioprocess runs without feeding microphone to speakers
 					const silentGain = micCtx.createGain()
 					silentGain.gain.value = 0
-					source.connect(processor)
+
+					source.connect(compressor)
+					compressor.connect(processor)
 					processor.connect(silentGain)
 					silentGain.connect(micCtx.destination)
 				} catch (micErr) {

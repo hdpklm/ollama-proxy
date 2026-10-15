@@ -558,3 +558,43 @@
 		- Se recibe `allow_barge_in` en el mensaje `config`.
 		- Si `allow_barge_in` es falso y existe un `current_task` en curso del asistente, se descartan las tramas binarias de audio y `user_text` entrantes.
 	- Actualizada la versión a `v0.7.25` en `project_status.md`.
+
+### 📝 Registro: [v0.7.27] - Cancelacion de eco acustico (AEC) nativa en navegador mediante loopback WebRTC in-memory
+- **date-time**: 2026-10-15 03:52:00
+- **Problema**:
+	- El micrófono del portátil o del teléfono móvil seguía captando el audio emitido por los altavoces durante la respuesta del asistente, sin que el motor de Acoustic Echo Cancellation (AEC) del navegador lo suprimiese.
+- **Causa**:
+	- En Chromium / WebRTC, el motor de cancelación de eco acústico (`webrtc::AudioProcessing` / AEC3) requiere una **señal de referencia de renderizado** (`ProcessReverseStream()`) para saber qué audio exacto debe restar de la captura del micrófono (`getUserMedia`).
+	- En la arquitectura interna del navegador, la reproducción a través de un elemento `new Audio(blobUrl)` desacoplado no está asociada a ningún contexto WebRTC, por lo que el subsistema de audio del navegador lo reproduce como un archivo multimedia independiente y **nunca entrega sus muestras al buffer de referencia de AEC**. Al carecer de señal de referencia, el AEC no tiene forma de cancelar el sonido del altavoz.
+	- El motor de AEC de Chromium únicamente engancha la señal de referencia de altavoz cuando la reproducción proviene de un track de `RTCPeerConnection` asociado a un elemento `<audio srcObject=stream>`.
+- **Solución**:
+	- En [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js):
+		- Se implementó un loopback local in-memory de WebRTC entre dos pares locales (`pc1` y `pc2`) con latencia cero:
+			1. Se genera un `MediaStreamDestinationNode` en el `AudioContext` de reproducción y se conecta a `pc1`.
+			2. `pc2` recibe el track en `ontrack` y lo asigna a un elemento `<audio id="webrtc-aec-speaker" autoplay playsinline>` insertado en el DOM.
+			3. Al reproducirse mediante WebRTC, `WebRtcAudioRenderer` entrega simultáneamente el audio a los altavoces físicos y alimenta el buffer de referencia inverso de AEC de Chromium.
+			4. Cuando `getUserMedia({ audio: { echoCancellation: true } })` captura el micrófono, el motor AEC de WebRTC sustrae matemáticamente el audio emitido por el altavoz, cancelando el eco en tiempo real directamente en el dispositivo cliente.
+	- Recompilado el bundle estático de producción (`pnpm build`) en `interface/frontend/dist`.
+
+### 📝 Registro: [v0.7.28] - Restricciones nativas estandar en getUserMedia, logging de settings y normalizacion por DynamicsCompressorNode
+- **date-time**: 2026-10-15 19:35:00
+- **Problema**:
+	- Se requerían las restricciones estándar nativas exactas en `getUserMedia` (`echoCancellation: true`, `noiseSuppression: true`, `autoGainControl: true`) sin flags propietarios, verificación por consola de los settings aplicados al track de audio y normalización de volumen.
+- **Causa**:
+	- `getUserMedia` contenía flags propietarios heredados (`googEchoCancellation`, etc.) y no realizaba log de verificación de `track.getSettings()`. Además, se requería compresión dinámica para nivelar el volumen de voz.
+- **Solución**:
+	- En [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js):
+		- Simplificadas las restricciones de `getUserMedia` a las nativas estándar: `{ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }`.
+		- Añadida verificación en consola: `console.log("[VoiceCall] Microphone track settings:", track?.getSettings())`.
+		- Añadido un `DynamicsCompressorNode` en la cadena de Web Audio antes de `ScriptProcessorNode` para normalizar la amplitud de voz, amplificar susurros y prevenir distorsión por picos.
+	- Recompilado el bundle estático de producción (`pnpm build`) en `interface/frontend/dist`.
+
+### 📝 Registro: [v0.7.29] - Incorporacion de voiceIsolation: true en constraints de getUserMedia
+- **date-time**: 2026-10-15 19:53:00
+- **Problema**:
+	- Se consultó sobre el parámetro `"voiceIsolation: false"` reportado por `track.getSettings()` y si requería habilitarse en las restricciones del micrófono.
+- **Causa**:
+	- `voiceIsolation` es una restricción W3C que delega en el sistema operativo (Apple Voice Isolation en macOS/iOS, Windows Studio Effects Voice Focus con NPU) la separación neuronal de la voz humana frente al ruido acústico de la habitación y fugas del altavoz. Estaba inactivo (`false`) por omisión.
+- **Solución**:
+	- Añadido `voiceIsolation: true` en las restricciones de `getUserMedia` en [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js). En sistemas compatibles se activa el aislamiento neuronal de voz a nivel de SO; en sistemas que no lo soportan, la especificación W3C lo ignora con seguridad sin producir error.
+	- Recompilado el bundle estático de producción (`pnpm build`) en `interface/frontend/dist`.

@@ -1,4 +1,4 @@
-# Project Status - Ollama Priority Proxy v0.7.25
+# Project Status - Ollama Priority Proxy v0.7.29
 
 ## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Interface Voice/Chat Module (PWA) + Standalone TTS/STT Services
 Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, modulo desacoplado de interfaz web PWA instalable en Android/navegador (React + Vite + Tailwind + Service Worker + Manifest), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS), microservicios independientes para Piper TTS y Vosk STT, y scripts desacoplados de compilacion local (`build.bat`) y transferencia directa SSH (`send.bat`).
@@ -27,7 +27,7 @@ Proxy HTTP y planificador de tokens por turno estricto con contextos KV independ
 - `src/components/SettingsModal.jsx`: Modal de configuracion para alternar TTS (Navegador/RPi5), STT (Navegador/RPi5) e interrupcion por voz (Barge-in on/off).
 - `src/components/ChatView.jsx`: Interfaz de mensajeria con envio de texto, grabacion de notas de voz y boton de reproduccion de audio asistencial.
 - `src/components/CallView.jsx`: Vista de llamada interactiva a pantalla completa con ondas de audio reactivas, estado de llamada y gestion de microfono en tiempo real.
-- `src/hooks/useVoiceCall.js`: Hook para gestion de canal WebSocket, captura continua de audio con cancelacion de eco de hardware, barge-in y reproduccion con HTMLAudioElement.
+- `src/hooks/useVoiceCall.js`: Hook para gestion de canal WebSocket, captura continua de audio con restricciones nativas (AEC, NS, AGC, voiceIsolation), normalizacion DynamicsCompressorNode y loopback WebRTC in-memory.
 
 ### `backend/config.py`
 - `config`: Gestiona variables de entorno, configuraciones de contexto/hilos y resolucion de rutas GGUF.
