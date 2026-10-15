@@ -633,3 +633,13 @@
 	  - Emisión de `is_final: true` con texto finalizado para disparar la generación y respuesta del LLM.
 	- En `useVoiceCall.js`, actualizado el handler de `user_transcript` para refrescar `userTranscript` con parciales y agregar a `callHistory` únicamente al finalizar la frase.
 	- Recompilado el bundle de frontend con `pnpm build`.
+
+### 📝 Registro: [v0.7.33] - Corrección de AttributeError en cliente WebSocket de Vosk
+- **date-time**: 2026-10-15 22:42:00
+- **Problema**:
+	- En dispositivos móviles la llamada WebSocket se cerraba abruptamente tras enviar los dos primeros mensajes (configuración y primer bloque de audio PCM16).
+- **Causa**:
+	- En la biblioteca `websockets` (versiones >= 12), las instancias de conexión (`ClientConnection`) no poseen el atributo `.closed`. La comprobación `vosk_ws.closed` provocaba un `AttributeError` no capturado al recibir el primer chunk binario, provocando el cierre inmediato del WebSocket.
+- **Solución**:
+	- Sustituida la comprobación por un método seguro `ensure_vosk()` con reconexión perezosa y captura explícita de excepciones en el envío `conn.send(pcm_data)`.
+	- En el bloque `finally:`, asegurado el cierre de `vosk_ws` mediante comprobación de existencia y bloque `try/except`.

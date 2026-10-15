@@ -112,7 +112,7 @@ async def websocket_call_endpoint(websocket: WebSocket):
 			})
 
 	async def listen_vosk():
-		nonlocal current_task
+		nonlocal current_task, vosk_ws
 		try:
 			async for msg_str in vosk_ws:
 				data = json.loads(msg_str)
@@ -143,13 +143,23 @@ async def websocket_call_endpoint(websocket: WebSocket):
 			pass
 		except Exception as e:
 			print(f"[WS Call] Vosk listen error: {e}")
+		finally:
+			vosk_ws = None
 
-	try:
-		vosk_ws = await websockets.connect(vosk_ws_url, ping_interval=20, ping_timeout=20)
-		vosk_task = asyncio.create_task(listen_vosk())
-		print(f"[WS Call] Connected to Vosk streaming WebSocket at {vosk_ws_url}")
-	except Exception as e:
-		print(f"[WS Call] Warning: Could not connect to Vosk WS ({vosk_ws_url}): {e}")
+	async def ensure_vosk():
+		nonlocal vosk_ws, vosk_task
+		if vosk_ws is None:
+			try:
+				vosk_ws = await websockets.connect(vosk_ws_url, ping_interval=20, ping_timeout=20)
+				vosk_task = asyncio.create_task(listen_vosk())
+				print(f"[WS Call] Connected to Vosk streaming WebSocket at {vosk_ws_url}")
+			except Exception as e:
+				print(f"[WS Call] Warning: Could not connect to Vosk WS ({vosk_ws_url}): {e}")
+				vosk_ws = None
+		return vosk_ws
+
+	# Pre-connect to Vosk
+	await ensure_vosk()
 
 	try:
 		while True:
@@ -163,8 +173,13 @@ async def websocket_call_endpoint(websocket: WebSocket):
 				pcm_data = message["bytes"]
 				if not allow_barge_in and current_task and not current_task.done():
 					continue
-				if vosk_ws and not vosk_ws.closed:
-					await vosk_ws.send(pcm_data)
+				conn = await ensure_vosk()
+				if conn:
+					try:
+						await conn.send(pcm_data)
+					except Exception as send_err:
+						print(f"[WS Call] Vosk send error: {send_err}")
+						vosk_ws = None
 
 			elif "text" in message and message["text"]:
 				try:
@@ -178,9 +193,15 @@ async def websocket_call_endpoint(websocket: WebSocket):
 					if not allow_barge_in and current_task and not current_task.done():
 						continue
 					b64_data = payload.get("data", "")
-					if b64_data and vosk_ws and not vosk_ws.closed:
-						raw_data = base64.b64decode(b64_data)
-						await vosk_ws.send(raw_data)
+					if b64_data:
+						conn = await ensure_vosk()
+						if conn:
+							raw_data = base64.b64decode(b64_data)
+							try:
+								await conn.send(raw_data)
+							except Exception as send_err:
+								print(f"[WS Call] Vosk chunk send error: {send_err}")
+								vosk_ws = None
 
 				elif msg_type == "config":
 					tts_mode = payload.get("tts_mode", tts_mode)
@@ -214,8 +235,9 @@ async def websocket_call_endpoint(websocket: WebSocket):
 		await cancel_ongoing_assistant()
 		if vosk_task and not vosk_task.done():
 			vosk_task.cancel()
-		if vosk_ws and not vosk_ws.closed:
+		if vosk_ws:
 			try:
 				await vosk_ws.close()
 			except Exception:
 				pass
+			vosk_ws = None
