@@ -81,6 +81,7 @@ async def websocket_call_endpoint(websocket: WebSocket):
 	tts_mode = "rpi5"
 
 	async def run_assistant_pipeline(user_prompt: str):
+		audio_buffer.clear()
 		conversation_history.append({"role": "user", "content": user_prompt})
 		await websocket.send_json({"type": "assistant_thinking"})
 
@@ -140,9 +141,6 @@ async def websocket_call_endpoint(websocket: WebSocket):
 					})
 
 			conversation_history.append({"role": "assistant", "content": accumulated_full_text})
-			audio_buffer.clear()
-			if silence_timer_task and not silence_timer_task.done():
-				silence_timer_task.cancel()
 			await websocket.send_json({
 				"type": "assistant_done",
 				"full_text": accumulated_full_text
@@ -155,10 +153,6 @@ async def websocket_call_endpoint(websocket: WebSocket):
 				"type": "error",
 				"message": str(e)
 			})
-		finally:
-			audio_buffer.clear()
-			if silence_timer_task and not silence_timer_task.done():
-				silence_timer_task.cancel()
 
 	try:
 		while True:
@@ -169,10 +163,6 @@ async def websocket_call_endpoint(websocket: WebSocket):
 				break
 
 			if "bytes" in message and message["bytes"]:
-				if current_task and not current_task.done():
-					# Drop microphone frames while assistant is generating/speaking to prevent echo loops
-					continue
-
 				data = message["bytes"]
 				audio_buffer.extend(data)
 

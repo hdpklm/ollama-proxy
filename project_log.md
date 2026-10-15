@@ -505,3 +505,39 @@
 		1. Se descartan paquetes PCM de micrófono entrantes si `current_task and not current_task.done()`.
 		2. Se limpian `audio_buffer` y el temporizador de silencio al finalizar `run_assistant_pipeline` (`assistant_done`) y al cancelar la tarea.
 	- Se reconstruyó el bundle estático de producción de la interfaz (`pnpm build`) en `interface/frontend/dist`.
+
+### 📝 Registro: [v0.7.23] - Sincronizacion de turnos cliente-servidor y eliminacion de bucle de auto-escucha
+- **date-time**: 2026-10-15 02:49:00
+- **Problema**:
+	- Tanto en el teléfono como en el portátil, el asistente escuchaba su propia voz emitida por los altavoces mientras respondía y entraba en un bucle infinito de responderse a sí mismo.
+- **Causa**:
+	- El pipeline del backend (`run_assistant_pipeline` en `call_ws.py`) genera los tokens y sintetiza los chunks de audio en ~1 segundo, marcando `current_task` como finalizado de inmediato en el servidor.
+	- Sin embargo, el navegador en el cliente requiere de 5 a 10 segundos para reproducir físicamente esos bloques de audio por los altavoces.
+	- Durante ese lapso en que el asistente seguía hablando físicamente, el servidor consideraba que el turno del asistente ya había concluido y procesaba el audio captado por el micrófono (la propia voz del asistente saliendo de los altavoces). Además, en el cliente, la cola de audio se vaciaba (`audioQueue.length === 0`) mientras el último bloque aún se reproducía, desbloqueando el micrófono prematuramente.
+- **Solución**:
+	- En [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js):
+		1. Bloqueo inmediato del micrófono desde el evento `assistant_thinking`, impidiendo cualquier envío durante la generación del LLM.
+		2. Control estricto con `isServerDoneRef` y seguimiento de reproducción en curso: el micrófono permanece completamente mudo hasta que todos los chunks se hayan reproducido físicamente en los altavoces más 400ms de disipación acústica.
+		3. Notificación explícita `playback_done` por WebSocket al servidor en el instante exacto en que cesa el sonido del altavoz.
+	- En [call_ws.py](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/routes/call_ws.py):
+		1. Implementado flag `is_assistant_turn = True` que descarta incondicionalmente cualquier frame de micrófono hasta recibir la confirmación `playback_done` del cliente.
+		2. Limpieza exhaustiva de `audio_buffer` al recibir `playback_done`, garantizando que únicamente la voz fresca del usuario sea enviada a Vosk STT.
+	- Se reconstruyó el bundle estático de producción (`pnpm build`) en `interface/frontend/dist`.
+
+### 📝 Registro: [v0.7.24] - Activacion de cancelacion de eco acustico (AEC) nativa y reproduccion desacoplada por HTMLAudioElement
+- **date-time**: 2026-10-15 03:12:00
+- **Problema**:
+	- La cancelación de eco de hardware/navegador (AEC), la supresión de ruido (NS) y el control automático de ganancia (AGC) no estaban suprimiendo el audio emitido por el altavoz, provocando que el micrófono capturara la voz del asistente y generara ecos o cortes artificiales.
+- **Causa**:
+	- En [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js), las restricciones pasadas a `getUserMedia` incluían `sampleRate: 16000`. En navegadores basados en Chromium (desktop y Android), forzar una frecuencia distinta a la nativa del hardware (44.1/48 kHz) en la captura deshabilita o degrada críticamente el pipeline de correlación de eco acústico por hardware (AEC).
+	- Además, la reproducción se realizaba mediante nodos Web Audio (`decodeAudioData` hacia `AudioContext.destination`), los cuales no se enrutan automáticamente al bus de referencia de AEC del navegador. Solo los elementos HTML5 `<audio>` son reconocidos por el gestor de audio del sistema operativo como fuentes remotas para sustracción de eco.
+	- Por último, se habían añadido bloqueos y pausas artificiales en el WebSocket que impedían la conversación fluida dúplex real (barge-in).
+- **Solución**:
+	- En [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js):
+		1. Se removió `sampleRate: 16000` de las restricciones de `getUserMedia`, habilitando la captura a la frecuencia nativa del hardware con soporte completo para `echoCancellation`, `noiseSuppression`, `autoGainControl`, `googEchoCancellation`, `googAutoGainControl`, `googNoiseSuppression` y `googHighpassFilter`.
+		2. La conversión a 16 kHz mono para Vosk se realiza ahora limpiamente en el `AudioContext` desacoplado mediante `createMediaStreamSource`.
+		3. Se reemplazó la reproducción por un elemento nativo `HTMLAudioElement` (`audioElementRef.current = new Audio()`), conectándolo directamente al pipeline de referencia de AEC del navegador para que el sonido de los altavoces sea cancelado en tiempo real de la entrada del micrófono.
+		4. Se eliminaron los silenciadores artificiales para permitir conversación full-dúplex con interrupción natural por voz.
+	- En [call_ws.py](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/routes/call_ws.py):
+		1. Se removió el estado bloqueante `is_assistant_turn`, permitiendo la recepción continua y sin latencia de audio filtrado por AEC.
+	- Se reconstruyó el bundle estático de producción (`pnpm build`) en `interface/frontend/dist`.
