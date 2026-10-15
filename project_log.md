@@ -655,3 +655,12 @@
 	- Refactorizado `ChatView.jsx` para transmitir PCM16 vía WebSocket a `/ws/stt` (o usar `SpeechRecognition` con `interimResults = true`) y volcar el texto transcrito directamente en el campo `input` en tiempo real.
 	- Eliminado el auto-envío forzado: el usuario puede revisar, editar y enviar manualmente el texto dictado.
 	- Recompilado el frontend con `pnpm build`.
+
+### 📝 Registro: [v0.7.35] - Corrección de parseo JSON y escritura en tiempo real en el input de chat
+- **date-time**: 2026-10-15 23:14:40
+- **Problema**:
+	- Al dictar por voz en la vista de chat, el texto transcrito por Vosk/STT no aparecía en el input de texto y la transcripción no se mostraba.
+- **Causa**:
+	- En `ChatView.jsx`, la función `ws.onmessage` contenía una referencia errónea a `json.loads` en código JavaScript (`json.loads ? JSON.parse(...)`), provocando un `ReferenceError: json is not defined` capturado silenciosamente en el bloque `catch`.
+- **Solución**:
+	- `interface/frontend/src/components/ChatView.jsx`: sustituido por `JSON.parse(event.data)`, añadido `committedTextRef` para acumular frases continuas y parciales sin sobrescribir texto previo en el input, y reconstruido el frontend con `pnpm build`.

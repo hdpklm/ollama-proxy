@@ -22,6 +22,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	const chatProcessorRef = useRef(null)
 	const currentAudioRef = useRef(null)
 	const audioCacheRef = useRef({})
+	const committedTextRef = useRef("")
 
 	useEffect(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -131,6 +132,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	}
 
 	const startVoiceRecording = async () => {
+		committedTextRef.current = input ? input.trim() + " " : ""
 		if (settings.useBrowserSTT) {
 			const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition
 			if (!SpeechRec) {
@@ -148,7 +150,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 						fullTranscript += e.results[i][0].transcript
 					}
 					if (fullTranscript.trim()) {
-						setInput(fullTranscript.trim())
+						setInput((committedTextRef.current + fullTranscript.trim()).trim())
 					}
 				}
 				rec.onend = () => setIsRecording(false)
@@ -210,11 +212,17 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 
 			ws.onmessage = (event) => {
 				try {
-					const data = json.loads ? JSON.parse(event.data) : JSON.parse(event.data)
+					const data = JSON.parse(event.data)
 					if (data.type === "transcript" && data.text) {
-						setInput(data.text)
+						const currentFull = (committedTextRef.current + data.text).trim()
+						setInput(currentFull)
+						if (data.is_final) {
+							committedTextRef.current = currentFull + " "
+						}
 					}
-				} catch (e) {}
+				} catch (e) {
+					console.error("STT parse error:", e)
+				}
 			}
 
 			ws.onerror = (err) => {
