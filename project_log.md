@@ -598,3 +598,24 @@
 - **Solución**:
 	- Añadido `voiceIsolation: true` en las restricciones de `getUserMedia` en [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js). En sistemas compatibles se activa el aislamiento neuronal de voz a nivel de SO; en sistemas que no lo soportan, la especificación W3C lo ignora con seguridad sin producir error.
 	- Recompilado el bundle estático de producción (`pnpm build`) en `interface/frontend/dist`.
+
+### 📝 Registro: [v0.7.30] - Cancelación de eco acústico nativa por hardware continua en llamada
+- **date-time**: 2026-10-15 20:58:00
+- **Problema**:
+	- Al utilizar el STT del navegador, el audio del altavoz se filtraba al micrófono debido a que `getUserMedia` con restricciones AEC (`echoCancellation: true`) solo se inicializaba si se usaba Vosk, dejando el micrófono sin filtro nativo de hardware durante el reconocimiento del navegador.
+- **Causa**:
+	- `getUserMedia` estaba condicionado dentro del bloque `else` de `settings?.useBrowserSTT`.
+- **Solución**:
+	- Reubicada la llamada de `navigator.mediaDevices.getUserMedia` para ejecutarse siempre al iniciar la llamada en [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js), manteniendo el stream de audio con AEC, supresión de ruido y control de ganancia activo durante toda la sesión.
+	- Recompilado el frontend con `pnpm build`.
+
+### 📝 Registro: [v0.7.31] - Eliminación de WebRTC loopback y salida de audio directa
+- **date-time**: 2026-10-15 21:10:00
+- **Problema**:
+	- Existía código legacy de un WebRTC loopback (`RTCPeerConnection`, `playStreamDest` y etiqueta `<audio id="webrtc-aec-speaker">`) creado anteriormente para forzar el enrutamiento de audio al AEC, complejizando innecesariamente la reproducción de voz.
+- **Causa**:
+	- Solución workaround anterior que ya no es necesaria con la captura nativa continua de `getUserMedia`.
+- **Solución**:
+	- Eliminadas las referencias y creación de `pc1`, `pc2`, `playStreamDest` y el elemento del DOM `webrtc-aec-speaker` en [useVoiceCall.js](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/frontend/src/hooks/useVoiceCall.js).
+	- Enrutado el audio del asistente directamente a `playCtx.destination` en `playNextAudioChunk`.
+	- Recompilado el bundle con `pnpm build`.

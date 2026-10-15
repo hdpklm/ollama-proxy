@@ -15,11 +15,8 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 	const processorRef = useRef(null)
 	const speechRecRef = useRef(null)
 
-	// WebRTC AEC loopback refs to feed speaker audio directly into Chrome's AEC reference pipeline
+	// Audio playback refs
 	const playAudioContextRef = useRef(null)
-	const playStreamDestRef = useRef(null)
-	const peerConnection1Ref = useRef(null)
-	const peerConnection2Ref = useRef(null)
 	const currentSourceRef = useRef(null)
 
 	const isMutedRef = useRef(false)
@@ -59,8 +56,7 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 		const base64Audio = audioQueueRef.current.shift()
 		try {
 			const playCtx = playAudioContextRef.current
-			const dest = playStreamDestRef.current
-			if (!playCtx || !dest) return
+			if (!playCtx) return
 
 			if (playCtx.state === "suspended") {
 				await playCtx.resume()
@@ -76,7 +72,7 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 			const audioBuffer = await playCtx.decodeAudioData(bytes.buffer.slice(0))
 			const source = playCtx.createBufferSource()
 			source.buffer = audioBuffer
-			source.connect(dest)
+			source.connect(playCtx.destination)
 			currentSourceRef.current = source
 
 			source.onended = () => {
@@ -109,27 +105,9 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 		isInCallRef.current = false
 		stopCurrentAudioPlayback()
 
-		if (peerConnection1Ref.current) {
-			try { peerConnection1Ref.current.close() } catch (e) {}
-			peerConnection1Ref.current = null
-		}
-		if (peerConnection2Ref.current) {
-			try { peerConnection2Ref.current.close() } catch (e) {}
-			peerConnection2Ref.current = null
-		}
 		if (playAudioContextRef.current) {
 			try { playAudioContextRef.current.close() } catch (e) {}
 			playAudioContextRef.current = null
-		}
-		playStreamDestRef.current = null
-
-		const audioElem = document.getElementById("webrtc-aec-speaker")
-		if (audioElem) {
-			try {
-				audioElem.pause()
-				audioElem.srcObject = null
-				audioElem.remove()
-			} catch (e) {}
 		}
 
 		if (speechRecRef.current) {
@@ -176,51 +154,11 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 		try {
 			setStatus("connecting")
 
-			// Initialize local WebRTC loopback audio output so Chrome AEC registers speaker sound as its reference signal
 			const playCtx = new (window.AudioContext || window.webkitAudioContext)()
 			playAudioContextRef.current = playCtx
 			if (playCtx.state === "suspended") {
 				await playCtx.resume()
 			}
-
-			const playDest = playCtx.createMediaStreamDestination()
-			playStreamDestRef.current = playDest
-
-			const pc1 = new RTCPeerConnection()
-			const pc2 = new RTCPeerConnection()
-			peerConnection1Ref.current = pc1
-			peerConnection2Ref.current = pc2
-
-			pc1.onicecandidate = (e) => {
-				if (e.candidate) pc2.addIceCandidate(e.candidate).catch(() => {})
-			}
-			pc2.onicecandidate = (e) => {
-				if (e.candidate) pc1.addIceCandidate(e.candidate).catch(() => {})
-			}
-
-			pc2.ontrack = (event) => {
-				let a = document.getElementById("webrtc-aec-speaker")
-				if (!a) {
-					a = document.createElement("audio")
-					a.id = "webrtc-aec-speaker"
-					a.autoplay = true
-					a.playsInline = true
-					document.body.appendChild(a)
-				}
-				a.srcObject = event.streams[0]
-				a.play().catch((err) => console.warn("AEC speaker play error:", err))
-			}
-
-			playDest.stream.getTracks().forEach((track) => {
-				pc1.addTrack(track, playDest.stream)
-			})
-
-			const offer = await pc1.createOffer()
-			await pc1.setLocalDescription(offer)
-			await pc2.setRemoteDescription(offer)
-			const answer = await pc2.createAnswer()
-			await pc2.setLocalDescription(answer)
-			await pc1.setRemoteDescription(answer)
 
 			let micStream = null
 			let micCtx = null
@@ -233,32 +171,34 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 					setStatus("disconnected")
 					return
 				}
-			} else {
-				if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-					alert("El acceso al micrófono requiere una conexión segura (HTTPS o localhost) o habilitar permisos en el navegador. En Android Chrome puedes habilitarlo en chrome://flags/#unsafely-treat-insecure-origin-as-secure agregando http://" + window.location.host)
-					setStatus("error")
-					return
+			}
+
+			if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+				alert("El acceso al micrófono requiere una conexión segura (HTTPS o localhost) o habilitar permisos en el navegador. En Android Chrome puedes habilitarlo en chrome://flags/#unsafely-treat-insecure-origin-as-secure agregando http://" + window.location.host)
+				setStatus("error")
+				return
+			}
+
+			try {
+				// Use standard WebRTC constraints for hardware echo cancellation, noise suppression and auto gain
+				// Do not constrain sampleRate in getUserMedia as it breaks hardware AEC correlation
+				const constraints = {
+					audio: {
+						echoCancellation: true,
+						noiseSuppression: true,
+						autoGainControl: true,
+						voiceIsolation: true
+					}
 				}
 
-				try {
-					// Use standard WebRTC constraints for hardware echo cancellation, noise suppression and auto gain
-					// Do not constrain sampleRate in getUserMedia as it breaks hardware AEC correlation
-					const constraints = {
-						audio: {
-							echoCancellation: true,
-							noiseSuppression: true,
-							autoGainControl: true,
-							voiceIsolation: true
-						}
-					}
+				micStream = await navigator.mediaDevices.getUserMedia(constraints)
+				micStreamRef.current = micStream
 
-					micStream = await navigator.mediaDevices.getUserMedia(constraints)
-					micStreamRef.current = micStream
+				const track = micStream.getAudioTracks()[0]
+				console.log("[VoiceCall] Microphone track settings:", track?.getSettings())
 
-					const track = micStream.getAudioTracks()[0]
-					console.log("[VoiceCall] Microphone track settings:", track?.getSettings())
-
-					// Downsample cleaned, echo-cancelled audio to 16 kHz for Vosk
+				// Downsample cleaned, echo-cancelled audio to 16 kHz for Vosk only
+				if (!settings?.useBrowserSTT) {
 					micCtx = new (window.AudioContext || window.webkitAudioContext)({
 						sampleRate: 16000
 					})
@@ -284,13 +224,13 @@ export function useVoiceCall(settings = { useBrowserTTS: false, useBrowserSTT: f
 					compressor.connect(processor)
 					processor.connect(silentGain)
 					silentGain.connect(micCtx.destination)
-				} catch (micErr) {
-					console.error("Microphone permission/access error:", micErr)
-					alert("Error al acceder al micrófono: " + (micErr.message || micErr.name))
-					setStatus("error")
-					endCall()
-					return
 				}
+			} catch (micErr) {
+				console.error("Microphone permission/access error:", micErr)
+				alert("Error al acceder al micrófono: " + (micErr.message || micErr.name))
+				setStatus("error")
+				endCall()
+				return
 			}
 
 			const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
