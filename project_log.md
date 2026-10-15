@@ -697,3 +697,15 @@
 	- `interface/backend/routes/call_ws.py`: en `@router.websocket("/ws/chat")` se añadió segmentación al vuelo mediante `SentenceChunker`. Al detectar un signo de puntuación delimitador, se sintetiza inmediatamente el fragmento y se envía al cliente como `audio_chunk` (audio base64 para Piper/RPi5) o `tts_sentence` (para TTS nativo del navegador).
 	- `interface/frontend/src/components/ChatView.jsx`: implementada cola de reproducción en streaming (`audioQueueRef`, `browserTtsQueueRef`, Web Audio API) para reproducir progresivamente cada fragmento recibido sin interrupciones, botón "Silenciar" para abortar el habla en cualquier momento e interrupción automática al iniciar un nuevo dictado o enviar mensaje.
 	- Recompilado el frontend con `pnpm build`.
+
+### 📝 Registro: [v0.7.39] - Corrección en backend: eliminación de interrupción unilateral de Vosk y sincronización de reproducción
+- **date-time**: 2026-10-16 00:36:00
+- **Problema**:
+	- En `/ws/call`, el backend cancelaba inmediatamente la generación y el habla del asistente en cuanto Vosk detectaba cualquier palabra parcial (`len(text) > 3`), interrumpiendo al modelo de forma prematura y retroalimentando transcripciones fragmentarias al LLM.
+- **Causa**:
+	- `listen_vosk` en `interface/backend/routes/call_ws.py` contenía una condición de interrupción unilateral sobre transcripciones parciales, asumiendo decisiones de reproducción que corresponden al cliente frontend.
+- **Solución**:
+	- `interface/backend/routes/call_ws.py`: eliminada la condición de cancelación sobre texto parcial (`elif allow_barge_in and current_task ... and len(text) > 3`), dejando la decisión de parada o interrupción exclusivamente en el frontend a través de mensajes `interrupt` o frases finales (`is_final`).
+	- Añadido manejador del evento `playback_status` para que el cliente notifique cuando la reproducción física de audio en altavoces está activa (`is_assistant_busy`), respetando el silenciamiento estricto cuando `allow_barge_in` esté desactivado.
+	- Descartada por completo cualquier comparación de texto artificial.
+	- Incrementada la versión a `v0.7.39` en `project_status.md`.

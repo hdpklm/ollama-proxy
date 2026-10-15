@@ -23,13 +23,18 @@ async def websocket_call_endpoint(websocket: WebSocket):
 	current_task: asyncio.Task | None = None
 	tts_mode = "rpi5"
 	allow_barge_in = True
+	client_is_playing = False
+
+	def is_assistant_busy() -> bool:
+		return (current_task is not None and not current_task.done()) or client_is_playing
 
 	vosk_ws_url = settings.STT_URL.replace("http://", "ws://").replace("https://", "wss://").rstrip("/") + "/ws"
 	vosk_ws = None
 	vosk_task: asyncio.Task | None = None
 
 	async def cancel_ongoing_assistant():
-		nonlocal current_task
+		nonlocal current_task, client_is_playing
+		client_is_playing = False
 		if current_task and not current_task.done():
 			current_task.cancel()
 			try:
@@ -131,13 +136,10 @@ async def websocket_call_endpoint(websocket: WebSocket):
 
 				# If final phrase completed, trigger LLM response
 				if is_final:
-					if not allow_barge_in and current_task and not current_task.done():
+					if not allow_barge_in and is_assistant_busy():
 						continue
 					await cancel_ongoing_assistant()
 					current_task = asyncio.create_task(run_assistant_pipeline(text))
-				elif allow_barge_in and current_task and not current_task.done() and len(text) > 3:
-					# User began speaking while assistant was talking -> interrupt immediately
-					await cancel_ongoing_assistant()
 
 		except (asyncio.CancelledError, websockets.ConnectionClosed):
 			pass
@@ -171,7 +173,7 @@ async def websocket_call_endpoint(websocket: WebSocket):
 
 			if "bytes" in message and message["bytes"]:
 				pcm_data = message["bytes"]
-				if not allow_barge_in and current_task and not current_task.done():
+				if not allow_barge_in and is_assistant_busy():
 					continue
 				conn = await ensure_vosk()
 				if conn:
@@ -190,7 +192,7 @@ async def websocket_call_endpoint(websocket: WebSocket):
 				msg_type = payload.get("type")
 
 				if msg_type == "audio_chunk":
-					if not allow_barge_in and current_task and not current_task.done():
+					if not allow_barge_in and is_assistant_busy():
 						continue
 					b64_data = payload.get("data", "")
 					if b64_data:
@@ -203,13 +205,16 @@ async def websocket_call_endpoint(websocket: WebSocket):
 								print(f"[WS Call] Vosk chunk send error: {send_err}")
 								vosk_ws = None
 
+				elif msg_type == "playback_status":
+					client_is_playing = bool(payload.get("is_playing", False))
+
 				elif msg_type == "config":
 					tts_mode = payload.get("tts_mode", tts_mode)
 					allow_barge_in = bool(payload.get("allow_barge_in", allow_barge_in))
 					print(f"[WS Call] Configured TTS mode: {tts_mode}, allow_barge_in: {allow_barge_in}")
 
 				elif msg_type == "user_text":
-					if not allow_barge_in and current_task and not current_task.done():
+					if not allow_barge_in and is_assistant_busy():
 						continue
 					text = payload.get("text", "").strip()
 					if text:
