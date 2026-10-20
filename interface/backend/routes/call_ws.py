@@ -2,11 +2,20 @@ import asyncio
 import base64
 import json
 import websockets
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from services.llm_client import LLMClient
 from services.tts_client import TTSClient
 from services.sentence_chunker import SentenceChunker
 from config import settings
+
+def stamp(text: str) -> str:
+	try:
+		now = datetime.now(ZoneInfo("Europe/Madrid"))
+	except Exception:
+		now = datetime.now().astimezone()
+	return f"[{now:%A %Y-%m-%d %H:%M} {now.tzname()}]\n{text}"
 
 router = APIRouter(tags=["call"])
 
@@ -20,6 +29,7 @@ async def websocket_call_endpoint(websocket: WebSocket):
 	conversation_history = [
 		{"role": "system", "content": "You are a voice assistant in a live phone call. Keep answers concise, clear, and direct."}
 	]
+	messages = conversation_history
 	current_task: asyncio.Task | None = None
 	tts_mode = "rpi5"
 	allow_barge_in = True
@@ -43,8 +53,8 @@ async def websocket_call_endpoint(websocket: WebSocket):
 				pass
 			current_task = None
 
-	async def run_assistant_pipeline(user_prompt: str):
-		conversation_history.append({"role": "user", "content": user_prompt})
+	async def run_assistant_pipeline(user_text: str):
+		messages.append({"role": "user", "content": stamp(user_text)})
 		await websocket.send_json({"type": "assistant_thinking"})
 
 		chunker = SentenceChunker(min_words=3, max_words=20)
@@ -409,10 +419,20 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 			if msg_type in ("chat", "send") or "messages" in data:
 				if current_stream_task and not current_stream_task.done():
 					current_stream_task.cancel()
-				messages = data.get("messages", [])
+				raw_messages = data.get("messages", [])
 				model = data.get("model", settings.LLM_MODEL)
 				tts_mode = data.get("tts_mode", "rpi5")
-				if messages:
+				if raw_messages:
+					messages = []
+					for m in raw_messages:
+						if m.get("role") == "user":
+							user_text = m.get("content", "")
+							if not user_text.startswith("["):
+								messages.append({"role": "user", "content": stamp(user_text)})
+							else:
+								messages.append(m)
+						else:
+							messages.append(m)
 					current_stream_task = asyncio.create_task(stream_tokens(messages, model, tts_mode))
 			elif msg_type == "stop":
 				if current_stream_task and not current_stream_task.done():

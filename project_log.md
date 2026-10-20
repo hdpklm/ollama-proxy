@@ -752,3 +752,17 @@
 	- `interface/frontend/src/components/ChatView.jsx`: aislado con `min-h-0 overflow-hidden` y barra de entrada inferior con `flex-shrink-0`, manteniendo el scroll unicamente en la lista de mensajes.
 	- `interface/frontend/src/components/CallView.jsx` y `AudioVisualizer.jsx`: restringidos con `overflow-hidden` y dimensiones responsivas optimizadas para pantallas moviles.
 	- Incrementada la version a `v0.7.42` en `project_status.md`.
+
+### 📝 Registro: [v0.7.43] - Inyeccion de marca temporal (timestamp Europe/Madrid) en mensajes de usuario
+- **date-time**: 2026-10-20 19:30:00
+- **Problema**:
+	- El modelo LLM no tenia contexto temporal exacto (dia de la semana, fecha, hora y zona horaria local) al recibir las preguntas del usuario tanto en llamada de voz como en chat.
+- **Causa**:
+	- Los turnos de conversacion del usuario se enviaban como texto sin procesar sin metadatos temporales anexados.
+- **Solución**:
+	- En `interface/backend/routes/call_ws.py`:
+		1. Se implemento la funcion `stamp(text: str)` utilizando `datetime.now(ZoneInfo("Europe/Madrid"))` con formato `[{now:%A %Y-%m-%d %H:%M} {now.tzname()}]\n{text}` y fallback seguro ante ausencias de tzdata.
+		2. En el manejador de llamada por voz (`/ws/call`), dentro de `run_assistant_pipeline`, se transformo el append del historial: `messages.append({"role": "user", "content": stamp(user_text)})`.
+		3. En el WebSocket de chat (`/ws/chat`), se anadio el formateo automatico con `stamp(user_text)` a los mensajes con rol `user` antes de remitirlos al streaming del LLM.
+	- En `interface/backend/routes/chat.py`: se incorporo la transformacion con `stamp` en el endpoint REST `/api/chat`.
+	- Actualizada la version a `v0.7.43` en `project_status.md`.

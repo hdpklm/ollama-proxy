@@ -10,6 +10,8 @@ llm_service = LLMClient()
 tts_service = TTSClient()
 stt_service = STTClient()
 
+from routes.call_ws import stamp
+
 class ChatRequest(BaseModel):
 	messages: list[dict]
 	model: str | None = None
@@ -21,7 +23,17 @@ class TTSRequest(BaseModel):
 @router.post("/chat")
 async def handle_chat(req: ChatRequest):
 	try:
-		res = await llm_service.chat(req.messages, model=req.model or "qwen2.5:0.5b")
+		messages = []
+		for m in req.messages:
+			if m.get("role") == "user":
+				user_text = m.get("content", "")
+				if not user_text.startswith("["):
+					messages.append({"role": "user", "content": stamp(user_text)})
+				else:
+					messages.append(m)
+			else:
+				messages.append(m)
+		res = await llm_service.chat(messages, model=req.model or "qwen2.5:0.5b")
 		return res
 	except Exception as e:
 		raise HTTPException(status_code=502, detail=f"LLM proxy error: {str(e)}")
