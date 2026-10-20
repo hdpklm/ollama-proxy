@@ -23,7 +23,10 @@ services:
     networks:
       - ollama-net
     ports:
-      - "8000:8000"
+      - "0.0.0.0:8000:8000"
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
     env_file:
       - .env
     volumes:
@@ -44,7 +47,10 @@ services:
     networks:
       - ollama-net
     ports:
-      - "8080:8080"
+      - "0.0.0.0:8080:8080"
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
     env_file:
       - path: .env
         required: false
@@ -77,7 +83,10 @@ services:
     networks:
       - ollama-net
     ports:
-      - "5000:5000"
+      - "0.0.0.0:5000:5000"
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
     environment:
       - MODELS_DIR=/app/modelos
       - VOICE_NAME=es_ES-sharvard-medium
@@ -98,7 +107,10 @@ services:
     networks:
       - ollama-net
     ports:
-      - "2700:2700"
+      - "0.0.0.0:2700:2700"
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
     environment:
       - MODELS_DIR=/app/modelos
       - UV_CACHE_DIR=/root/.cache/uv
@@ -112,3 +124,4 @@ networks:
   ollama-net:
     name: ollama-net
     driver: bridge
+    enable_ipv6: false

@@ -722,3 +722,16 @@
 		2. Modo 2 (Híbrido): `HTMLAudioElement` + `@ricky0123/vad-web` (Silero VAD en WASM offline). Discrimina si el audio entrante es voz humana y bloquea el micrófono mientras el altavoz suena a menos que el usuario hable.
 		3. Modo 3 (Avanzado): `@ennuicastr/webrtcaec3.js` en WASM con análisis de referencia de audio y procesador AEC3, complementado con un tono de calibración acústico inicial para medir la latencia física de la sala y fijar `setAudioBufferDelay`.
 	- Copiados los artefactos estáticos de VAD (`silero_vad_v5.onnx`, `vad.worklet.bundle.min.js`, onnxruntime wasm) a `public/vad/` y de AEC3 a `public/aec/`.
+
+### 📝 Registro: [v0.7.41] - Restriccion estricta a IPv4 en Docker Compose
+- **date-time**: 2026-10-20 19:00:00
+- **Problema**:
+	- Se requeria que todos los servicios y la red interna de Docker Compose operen exclusivamente sobre IPv4, impidiendo el uso de IPv6 tanto en puertos expuestos en el host como en la comunicacion interna y externa de los contenedores.
+- **Causa**:
+	- Por defecto, Docker enlaza los puertos publicados (`ports`) en doble pila (`0.0.0.0` y `:::`) y la red bridge puede tener asignacion IPv6 si el daemon esta configurado para ello. Asimismo, los contenedores intentan resolver o rutear trafico IPv6 a menos que se deshabilite explícitamente en el kernel de la red del contenedor.
+- **Solución**:
+	- En `docker-compose.yml`:
+		1. Se fijaron los puertos expuestos con prefijo IPv4 explicito `0.0.0.0:` (`0.0.0.0:8000:8000`, `0.0.0.0:8080:8080`, `0.0.0.0:5000:5000`, `0.0.0.0:2700:2700`), previniendo que `docker-proxy` abra sockets en `[::]`.
+		2. Se anadieron sysctls de red a cada contenedor (`net.ipv6.conf.all.disable_ipv6=1` y `net.ipv6.conf.default.disable_ipv6=1`) para deshabilitar la pila IPv6 dentro de los contenedores.
+		3. Se configuro `enable_ipv6: false` explicitamente en la definicion de la red bridge `ollama-net`.
+	- Actualizada la version a `v0.7.41` en `project_status.md`.
