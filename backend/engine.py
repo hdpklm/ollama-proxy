@@ -63,6 +63,11 @@ class LlamaEngine:
 				extra_params["top_p"] = float(job.body["top_p"])
 
 		if messages:
+			if "tools" in job.body and job.body["tools"]:
+				extra_params["tools"] = job.body["tools"]
+			if "tool_choice" in job.body and job.body["tool_choice"]:
+				extra_params["tool_choice"] = job.body["tool_choice"]
+
 			return llm.create_chat_completion(
 				messages=messages,
 				max_tokens=limit,
@@ -78,11 +83,16 @@ class LlamaEngine:
 			**extra_params,
 		)
 
-	def extract_chunk(self, job: Job, chunk: dict) -> Tuple[str, str | None]:
+	def extract_chunk(self, job: Job, chunk: dict) -> Tuple[str | dict, str | None]:
 		choice = chunk["choices"][0]
 		if job.kind == CHAT:
 			delta = choice.get("delta") or {}
 			text = delta.get("content") or ""
+			tool_calls = delta.get("tool_calls")
+			finish = choice.get("finish_reason")
+			if tool_calls:
+				return {"content": text, "tool_calls": tool_calls}, finish
+			return text, finish
 		else:
 			text = choice.get("text") or ""
-		return text, choice.get("finish_reason")
+			return text, choice.get("finish_reason")

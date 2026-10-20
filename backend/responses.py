@@ -15,23 +15,32 @@ def _sse(payload):
 	return f"data: {json.dumps(payload)}\n\n"
 
 
-def _chunk(job, text="", finish=None, role=False):
+def _chunk(job, value="", finish=None, role=False):
 	if job.kind == GENERATE:
+		text_val = value.get("content", "") if isinstance(value, dict) else str(value or "")
 		return {
-			"response": text,
+			"response": text_val,
 			"done": finish is not None,
 			"priority": job.priority,
 			"kv_cache_ram_mb": job.kv_cache_ram_mb,
 		}
 
 	if job.kind == CHAT:
-		delta = {"content": text} if (text or role) else {}
+		delta = {}
 		if role:
 			delta["role"] = "assistant"
+		if isinstance(value, dict):
+			if "content" in value and value["content"] is not None:
+				delta["content"] = value["content"]
+			if "tool_calls" in value and value["tool_calls"] is not None:
+				delta["tool_calls"] = value["tool_calls"]
+		elif value:
+			delta["content"] = str(value)
 		choice = {"index": 0, "delta": delta, "finish_reason": finish}
 		kind = "chat.completion.chunk"
 	else:
-		choice = {"index": 0, "text": text, "finish_reason": finish}
+		text_val = value.get("content", "") if isinstance(value, dict) else str(value or "")
+		choice = {"index": 0, "text": text_val, "finish_reason": finish}
 		kind = "text_completion"
 
 	prefix = "chatcmpl" if job.kind == CHAT else "cmpl"
@@ -41,6 +50,7 @@ def _chunk(job, text="", finish=None, role=False):
 		"created": job.created,
 		"model": job.body.get("model", "local"),
 		"choices": [choice],
+		"priority": job.priority,
 	}
 
 
@@ -56,7 +66,7 @@ async def stream_body(job):
 			continue
 		if event == DONE:
 			yield _sse(_chunk(job, finish=value))
-			yield _sse({
+			done_payload = {
 				"id": f"{prefix}-{job.id}",
 				"object": "chat.completion.chunk" if job.kind == CHAT else "text_completion",
 				"created": job.created,
@@ -72,7 +82,11 @@ async def stream_body(job):
 					"tokens_per_second": job.generation_tps,
 				},
 				"priority": job.priority,
-			})
+				"kv_cache_ram_mb": job.kv_cache_ram_mb,
+			}
+			if not job.priority and job.times_paused > 0:
+				done_payload["times_paused"] = job.times_paused
+			yield _sse(done_payload)
 		else:
 			yield _sse({"error": {"message": value}})
 		yield "data: [DONE]\n\n"
@@ -116,9 +130,12 @@ async def collect_body(job):
 	}
 
 	if job.kind == CHAT:
+		msg = {"role": "assistant", "content": job.partial or None}
+		if job.tool_calls:
+			msg["tool_calls"] = job.tool_calls
 		choice = {
 			"index": 0,
-			"message": {"role": "assistant", "content": job.partial},
+			"message": msg,
 			"finish_reason": value,
 		}
 		kind = "chat.completion"
@@ -134,6 +151,7 @@ async def collect_body(job):
 		"choices": [choice],
 		"usage": usage,
 		"priority": job.priority,
+		"kv_cache_ram_mb": job.kv_cache_ram_mb,
 	}
 	if not job.priority and job.times_paused > 0:
 		res["times_paused"] = job.times_paused

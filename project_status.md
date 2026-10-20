@@ -1,9 +1,21 @@
-# Project Status - Ollama Priority Proxy v0.8.1
+# Project Status - Ollama Priority Proxy v0.9.2
 
-## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Interface Voice/Chat Module (PWA) + Standalone TTS/STT Services + Standalone Web-Tools + Redis Stack Vector RAG
-Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, modulo desacoplado de interfaz web PWA instalable en Android/navegador (React + Vite + Tailwind + Service Worker + Manifest), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS), microservicios independientes para Piper TTS, Vosk STT y Web-Tools (Parallel/DDG search, trafilatura reader y PDF extractor), persistencia y búsqueda vectorial RAG en Redis Stack con almacenamiento persistente en `/docker/storage/redis`, tool-calling autónomo gobernado por el propio LLM, y scripts desacoplados de compilacion local (`build.bat`) y transferencia directa SSH (`send.bat`).
+## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Native OpenAI Tool-Calling Engine + Interface Voice/Chat Module (PWA) + Standalone TTS/STT Services + Standalone Web-Tools + Redis Stack Vector RAG
+Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, motor de tool-calling nativo compatible con la API de OpenAI preservando estrictamente todas las características de request (`priority`, `fast`, `max_tokens`, `temperature`, `tools`) y response (`priority`, `times_paused`, `kv_cache_ram_mb`, métricas TPS de prompt y generación), módulo desacoplado de interfaz web PWA instalable en Android/navegador (React + Vite + Tailwind + Service Worker + Manifest), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS), microservicios independientes para Piper TTS, Vosk STT y Web-Tools (Parallel/DDG search, trafilatura reader y PDF extractor), persistencia y búsqueda vectorial RAG en Redis Stack (`/docker/storage/redis`), y scripts desacoplados de compilacion local (`build.bat`) y transferencia directa SSH (`send.bat`).
 
 ## Mapeo de Modulos y Responsabilidades
+### `backend/engine.py`
+- `LlamaEngine`: Gestiona dos contextos Llama (alta y baja prioridad) compartiendo pesos en solo lectura mediante mmap, propagando nativamente `tools` a `create_chat_completion` y extrayendo `tool_calls` de `delta`.
+
+### `backend/scheduler.py`
+- `Scheduler`: Bucle continuo de evaluacion de 1 token por tick dando prioridad estricta al 100% de la CPU a tareas urgentes, orquestando streams de texto y eventos de `tool_calls`, e incrementando `times_paused` al interrumpir tareas en curso.
+
+### `backend/responses.py`
+- `responses`: Serializador de eventos SSE y respuestas JSON compatibles con OpenAI y Ollama, incluyendo `tool_calls` sin perder `priority`, `times_paused`, `kv_cache_ram_mb` ni métricas TPS.
+
+### `backend/job.py`
+- `Job`: Estructura de datos para solicitudes de chat, completado y generacion con colas de emision asincronas y acumulacion de `tool_calls`.
+
 ### `dockers/web-tools`
 - `main.py`: Microservicio FastAPI que expone en puerto 7000 busqueda web (Parallel API / DDG), extraccion de articulos a Markdown (`trafilatura`/`markdownify`) y conversion de PDF a Markdown (`pypdf`).
 - `Dockerfile`: Contenedor independiente con Python 3.11, gestor `uv` y cache compartida.
@@ -18,18 +30,16 @@ Proxy HTTP y planificador de tokens por turno estricto con contextos KV independ
 
 ### `interface/backend`
 - `main.py`: Inicializa la aplicacion FastAPI del modulo interface, monta rutas REST/WebSocket y sirve los estaticos compilados de `frontend/dist`.
-- `config.py`: Centraliza variables de entorno para endpoints externos de LLM, STT, TTS, Web-Tools y Redis, e inyeccion de `system_prompt.md` con especificaciones de tool-calling.
-- `system_prompt.md`: Plantilla Markdown de instrucciones de sistema con especificación y esquemas de herramientas disponibles para tool-calling autónomo.
-- `routes/chat.py`: Endpoints REST para interaccion chat con bucle agéntico de tool-calling autónomo (`<tool_call>`) y sellado temporal.
-- `routes/call_ws.py`: Handlers WebSocket para llamadas de voz (/ws/call), dictado STT en streaming (/ws/stt) y generacion token a token de chat (/ws/chat) con detección de tool-calling y streaming reactivo a TTS.
+- `config.py`: Centraliza variables de entorno para endpoints externos de LLM, STT, TTS, Web-Tools y Redis, e inyeccion limpia de `system_prompt.md`.
+- `system_prompt.md`: Prompt conversacional puro sin inyeccion artificial de esquemas en texto.
+- `routes/chat.py`: Endpoints REST para interaccion chat con bucle agéntico de tool-calling nativo de OpenAI (`tool_calls`).
+- `routes/call_ws.py`: Handlers WebSocket para llamadas de voz (/ws/call) y chat (/ws/chat) con detección nativa de `tool_calls` y streaming seguro sin fuga hacia TTS.
 - `routes/web_tools.py`: Endpoints REST `/api/tools/search`, `/api/tools/read` y `/api/tools/pdf`.
-- `services/tool_executor.py`: Extrae bloques `<tool_call>` emitidos por el LLM, ejecuta herramientas de búsqueda, lectura web o PDF e indexa el contenido.
+- `services/tool_definitions.py`: Esquemas estándar de herramientas OpenAI (`search_web`, `read_url`, `read_pdf`).
+- `services/tool_executor.py`: Ejecutor de herramientas locales y web que alimenta la observacion del modelo e indexa en el RAG.
 - `services/web_tools_client.py`: Cliente asincrono hacia `web-tools` con autenticación Parallel exclusiva en búsqueda y desacoplada de lectura/PDF.
 - `services/rag_service.py`: Servicio RAG con búsqueda vectorial RediSearch (`FT.CREATE`, `FT.SEARCH` con KNN y cosine distance) y metadatos (`TAG`, `TEXT`, `NUMERIC`) sobre Redis Stack (`/docker/storage/redis`), con fallback local.
-- `services/llm_client.py`: Cliente asincrono HTTP/streaming hacia el proxy LLM.
-- `services/stt_client.py`: Cliente de transcripcion hacia Vosk (HTTP/WebSocket).
-- `services/tts_client.py`: Cliente de sintesis de voz hacia Piper.
-- `services/sentence_chunker.py`: Buffer de tokens del LLM que segmenta texto por limites de oracion para alimentar concurrentemente al TTS.
+- `services/llm_client.py`: Cliente asincrono HTTP/streaming hacia el proxy LLM con soporte de parametro nativo `tools`.
 
 ### `interface/frontend`
 - `src/App.jsx`: Componente raiz con hash-routing para alternar entre modo Chat y modo Llamada y persistencia de settings de voz.

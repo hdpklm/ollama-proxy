@@ -806,3 +806,48 @@
 	- `services/web_tools_client.py`: Se elimino el paso de `x-api-key` en `/read` y `/pdf`, restringiendo la clave de Parallel exclusivamente a `/search`.
 	- `services/rag_service.py`: Se implemento el indice RediSearch `idx:rag` con campos `TAG` (`url`, `source`), `TEXT` (`content`, `title`), `NUMERIC` (`timestamp`) y busqueda vectorial KNN (`HNSW`, `FLOAT32`, `COSINE`), con embeddings locales de 128 dimensiones normalizados e indexacion automatica de documentos consultados.
 	- `services/tool_executor.py`, `routes/call_ws.py` y `routes/chat.py`: Se elimino toda heuristica rigida basada en palabras clave. Se implemento un bucle agentico autonomo que detecta cuando el LLM emite `<tool_call>`, ejecuta la herramienta correspondiente, realimenta la conversacion con los resultados como observacion y sintetiza la respuesta final grounded sin interrumpir la emision hacia TTS.
+
+### 📝 Registro: [v0.8.2] - Correccion de parser de argumentos polimorficos en tool_executor y supresion de fuga de tags tool_call a TTS
+- **date-time**: 2026-10-20 21:50:00
+- **Problema**:
+	- Durante la invocacion de herramientas (`search_web`), el modelo emitio `"arguments": "tiempo mañana en barcelona"` en formato cadena plana en lugar de un diccionario `{"query": "..."}`. Esto causo una excepcion no controlada: `'str' object has no attribute 'get'`.
+	- Los tokens correspondientes al bloque `<tool_call>` se filtraban al flujo de salida de texto y al segmentador de oraciones del sintetizador de voz, provocando que el navegador y el TTS pronunciasen en voz alta fragmentos de codigo JSON y etiquetas de tool-calling (`"<tool_call>\n{\"name\":"`).
+- **Causa**:
+	- `execute_tool()` en `tool_executor.py` asumia estrictamente que `arguments` era siempre un diccionario invocando `.get()`.
+	- En `call_ws.py`, el flag de streaming activaba el envio continuo de tokens hacia el cliente y el `SentenceChunker` sin silenciar la subsecuente aparicion de bloques de herramientas.
+- **Solución**:
+	- `services/tool_executor.py`: Se implemento extraccion polimorfica de argumentos (`_extract_query` y `_extract_url`) soportando cadenas directas, diccionarios con claves variadas (`query`, `q`, `location`, etc.) y formatos simplificados, eliminando cualquier riesgo de error por tipo.
+	- `routes/call_ws.py`: Se añadio filtrado y supresion estricta en `run_assistant_pipeline` y `stream_tokens` para que cualquier token perteneciente a `<tool_call` sea interceptado sin enviarse jamas al `SentenceChunker` ni como token de chat visible al usuario.
+	- `system_prompt.md` y `config.py`: Se reforzo la instruccion del prompt para que el LLM responda exclusivamente con el bloque `<tool_call>` sin preludios conversacionales cuando decida usar herramientas.
+
+### 📝 Registro: [v0.8.3] - Estandarizacion formal de esquemas JSON Schema para tool-calling en system prompt y config
+- **date-time**: 2026-10-20 22:17:00
+- **Problema**:
+	- Las especificaciones de herramientas en `system_prompt.md` y `config.py` utilizaban una sintaxis informal y ambigua con comodines (`<nombre_herramienta>`, `<parametro>`), induciendo a modelos locales como `gemma:e2b` a generar salidas no estructuradas.
+- **Causa**:
+	- Redacción preliminar no conforme con los esquemas formales JSON Schema que los LLMs modernos esperan para invocación estructurada de funciones.
+- **Solución**:
+	- `system_prompt.md` y `config.py`: Se reescribieron las definiciones de herramientas (`search_web`, `read_url`, `read_pdf`) utilizando el estándar formal JSON Schema (especificación de tipos, descripciones detalladas y parámetros requeridos), junto con un ejemplo concreto y reglas claras que prohíben texto conversacional previo a la invocación de herramientas.
+
+### 📝 Registro: [v0.9.1] - Preservación estricta de parámetros de Request/Response y preempción de tareas urgentes
+- **date-time**: 2026-10-20 22:42:00
+- **Problema**:
+	- Riesgo de pérdida de características personalizadas en los JSON de entrada y salida (como `priority: true` para preguntas urgentes que pausan la tarea en segundo plano, `fast`, `max_tokens`, `temperature`, `times_paused`, `kv_cache_ram_mb` y métricas TPS) al integrar el tool-calling nativo de OpenAI.
+- **Causa**:
+	- `LLMClient.chat` normalizaba la respuesta devolviendo únicamente `{"message": msg}` y omitía la propagación de `priority` en las firmas de `stream_chat` y `chat`. Además, en `Scheduler._token_loop` no se incrementaba `times_paused` en la tarea de baja prioridad al ser interrumpida por una urgente.
+- **Solución**:
+	- `backend/scheduler.py`: Al iniciar una tarea urgente (`current_high`), se incrementa `current_low.times_paused += 1` si había una tarea previa activa.
+	- `backend/responses.py`: Se garantiza la inclusión de `priority` y `kv_cache_ram_mb` en todos los chunks SSE de chat y en `collect_body`, así como `times_paused` en el chunk de uso y en la respuesta unificada.
+	- `interface/backend/services/llm_client.py`: Se añadieron los parámetros `priority`, `fast`, `max_tokens`, `temperature` en `stream_chat` y `chat`, preservando el objeto de respuesta completo (`priority`, `usage`, `times_paused`, `kv_cache_ram_mb`, `choices`) a la vez que se provee la clave `message`.
+	- `interface/backend/routes/chat.py` y `call_ws.py`: Se agregaron los campos opcionales en `ChatRequest` y en el protocolo WebSocket (`/ws/chat`), garantizando que cualquier petición urgente con `priority: true` sea despachada con máxima prioridad y pause de inmediato cualquier generación previa.
+
+### 📝 Registro: [v0.9.2] - Corrección de estampación de fecha/hora en español, directrices de herramientas en prompt y filtrado de eco
+- **date-time**: 2026-10-20 23:05:00
+- **Problema**:
+	- El modelo repetía el encabezado `[Hora local actual del usuario: ...]` al inicio de sus respuestas y preguntaba "¿Podrías confirmar qué día es mañana?" en lugar de calcular la fecha o invocar `search_web`. Además, `system_prompt.md` no estaba montado en el volumen de `interface` en `docker-compose.yml`.
+- **Causa**:
+	- La estampación generaba fecha en inglés (`Tuesday 2026-10-20 CEST`) provocando ambigüedad en el razonamiento de fechas relativas en español ("mañana"). La plantilla de sistema no indicaba calcular fechas relativas ni consultar herramientas directamente ante preguntas de tiempo/noticias, y el modelo tendía a ecoar el corchete inicial.
+- **Solución**:
+	- `docker-compose.yml`: Se añadió el montaje de volumen `./interface/backend/system_prompt.md:/app/system_prompt.md`.
+	- `system_prompt.md` y `config.py`: Se especificó calcular directamente días relativos (hoy/mañana/ayer) a partir de la fecha dada, prohibir repetir corchetes/encabezados y usar `search_web` directamente sin pedir confirmaciones.
+	- `call_ws.py`: Se formateó `stamp` con nombres de día y mes en español (`[Fecha y hora actual: Martes 20 de octubre de 2026, 23:00 CEST]`) y se implementó un filtro que trunca de inmediato cualquier eco de encabezado entre corchetes antes de enviarlo al usuario o al sintetizador TTS.

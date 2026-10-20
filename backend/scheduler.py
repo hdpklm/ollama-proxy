@@ -54,6 +54,8 @@ class Scheduler:
 				if self.current_high is None:
 					try:
 						self.current_high = self.high_queue.get_nowait()
+						if self.current_low is not None:
+							self.current_low.times_paused += 1
 						self.current_high.prompt_tokens = self.engine.count_prompt_tokens(self.current_high)
 						self.current_high.t_start = time.time()
 						self.stream_high = self.engine.create_stream(self.current_high)
@@ -77,15 +79,25 @@ class Scheduler:
 						self.current_high.prompt_eval_seconds = max(now - self.current_high.t_start, 0.001)
 						self.current_high.prompt_tps = round(self.current_high.prompt_tokens / self.current_high.prompt_eval_seconds, 2)
 
-					text, finish = self.engine.extract_chunk(self.current_high, chunk)
-					if text:
-						self.current_high.partial += text
+					chunk_data, finish = self.engine.extract_chunk(self.current_high, chunk)
+					if chunk_data:
+						if isinstance(chunk_data, dict):
+							text_val = chunk_data.get("content", "")
+							tc_val = chunk_data.get("tool_calls", [])
+							if text_val:
+								self.current_high.partial += text_val
+							if tc_val:
+								self.current_high.tool_calls.extend(tc_val)
+						else:
+							text_val = chunk_data
+							self.current_high.partial += text_val
+
 						self.current_high.generated += 1
 						gen_time = max(now - self.current_high.t_first_token, 0.001)
 						self.current_high.generation_seconds = round(gen_time, 2)
 						self.current_high.generation_tps = round(self.current_high.generated / gen_time, 2)
 						if self.loop:
-							self.loop.call_soon_threadsafe(self.current_high.out.put_nowait, (DELTA, text))
+							self.loop.call_soon_threadsafe(self.current_high.out.put_nowait, (DELTA, chunk_data))
 
 					if finish is not None:
 						gen_time = max(time.time() - self.current_high.t_first_token, 0.001) if self.current_high.t_first_token else 0.001
@@ -134,15 +146,25 @@ class Scheduler:
 						self.current_low.prompt_eval_seconds = max(now - self.current_low.t_start, 0.001)
 						self.current_low.prompt_tps = round(self.current_low.prompt_tokens / self.current_low.prompt_eval_seconds, 2)
 
-					text, finish = self.engine.extract_chunk(self.current_low, chunk)
-					if text:
-						self.current_low.partial += text
+					chunk_data, finish = self.engine.extract_chunk(self.current_low, chunk)
+					if chunk_data:
+						if isinstance(chunk_data, dict):
+							text_val = chunk_data.get("content", "")
+							tc_val = chunk_data.get("tool_calls", [])
+							if text_val:
+								self.current_low.partial += text_val
+							if tc_val:
+								self.current_low.tool_calls.extend(tc_val)
+						else:
+							text_val = chunk_data
+							self.current_low.partial += text_val
+
 						self.current_low.generated += 1
 						gen_time = max(now - self.current_low.t_first_token, 0.001)
 						self.current_low.generation_seconds = round(gen_time, 2)
 						self.current_low.generation_tps = round(self.current_low.generated / gen_time, 2)
 						if self.loop:
-							self.loop.call_soon_threadsafe(self.current_low.out.put_nowait, (DELTA, text))
+							self.loop.call_soon_threadsafe(self.current_low.out.put_nowait, (DELTA, chunk_data))
 
 					if finish is not None:
 						gen_time = max(time.time() - self.current_low.t_first_token, 0.001) if self.current_low.t_first_token else 0.001

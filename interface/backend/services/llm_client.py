@@ -13,14 +13,32 @@ class LLMClient:
 			headers["Authorization"] = f"Bearer {settings.API_KEY}"
 		return headers
 
-	async def stream_chat(self, messages: list[dict], model: str = settings.LLM_MODEL) -> AsyncGenerator[str, None]:
+	async def stream_chat(
+		self,
+		messages: list[dict],
+		model: str = settings.LLM_MODEL,
+		tools: list[dict] | None = None,
+		priority: bool = False,
+		fast: bool = True,
+		max_tokens: int | None = None,
+		temperature: float | None = None,
+		**kwargs
+	) -> AsyncGenerator[str | dict, None]:
 		url = f"{self.base_url}/v1/chat/completions"
 		payload = {
 			"model": model,
 			"messages": messages,
 			"stream": True,
-			"fast": True
+			"fast": fast,
+			"priority": priority
 		}
+		if max_tokens is not None:
+			payload["max_tokens"] = max_tokens
+		if temperature is not None:
+			payload["temperature"] = temperature
+		if tools:
+			payload["tools"] = tools
+		payload.update(kwargs)
 		headers = self._get_headers()
 
 		async with httpx.AsyncClient(timeout=60.0) as client:
@@ -55,24 +73,57 @@ class LLMClient:
 						choices = data.get("choices", [])
 						if choices:
 							delta = choices[0].get("delta", {})
+							tool_calls = delta.get("tool_calls")
+							if tool_calls:
+								yield {"tool_calls": tool_calls}
 							content = delta.get("content", "")
 							if content:
 								yield content
+						elif "usage" in data:
+							yield {
+								"type": "usage",
+								"usage": data.get("usage"),
+								"priority": data.get("priority"),
+								"times_paused": data.get("times_paused"),
+								"kv_cache_ram_mb": data.get("kv_cache_ram_mb")
+							}
 						elif "message" in data:
-							content = data.get("message", {}).get("content", "")
+							msg = data.get("message", {})
+							tool_calls = msg.get("tool_calls")
+							if tool_calls:
+								yield {"tool_calls": tool_calls}
+							content = msg.get("content", "")
 							if content:
 								yield content
 					except Exception:
 						continue
 
-	async def chat(self, messages: list[dict], model: str = settings.LLM_MODEL) -> dict:
+	async def chat(
+		self,
+		messages: list[dict],
+		model: str = settings.LLM_MODEL,
+		tools: list[dict] | None = None,
+		priority: bool = False,
+		fast: bool = True,
+		max_tokens: int | None = None,
+		temperature: float | None = None,
+		**kwargs
+	) -> dict:
 		url = f"{self.base_url}/v1/chat/completions"
 		payload = {
 			"model": model,
 			"messages": messages,
 			"stream": False,
-			"fast": True
+			"fast": fast,
+			"priority": priority
 		}
+		if max_tokens is not None:
+			payload["max_tokens"] = max_tokens
+		if temperature is not None:
+			payload["temperature"] = temperature
+		if tools:
+			payload["tools"] = tools
+		payload.update(kwargs)
 		headers = self._get_headers()
 
 		async with httpx.AsyncClient(timeout=60.0) as client:
@@ -84,12 +135,13 @@ class LLMClient:
 			resp.raise_for_status()
 			data = resp.json()
 
-			# Normalize response to standard format for frontend
+			# Preserve all metadata (priority, times_paused, kv_cache_ram_mb, usage) while normalizing message
 			if "choices" in data and data["choices"]:
-				msg = data["choices"][0].get("message", {})
-				return {"message": msg}
+				data["message"] = data["choices"][0].get("message", {})
+				return data
 			elif "message" in data:
-				return {"message": data["message"]}
+				return data
 			elif "response" in data:
-				return {"message": {"role": "assistant", "content": data["response"]}}
+				data["message"] = {"role": "assistant", "content": data["response"]}
+				return data
 			return data

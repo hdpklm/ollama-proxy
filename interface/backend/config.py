@@ -33,17 +33,9 @@ def load_default_system_prompt() -> str:
 			pass
 	return (
 		"Eres un asistente conversacional inteligente, conciso y directo en español.\n"
-		"La marca de tiempo [Hora local actual del usuario: ...] al inicio de los mensajes indica su fecha y hora local exacta (Europe/Madrid).\n\n"
-		"## Herramientas Disponibles (Tool Calling)\n"
-		"Si necesitas información externa, noticias actualizadas o consultar enlaces web/PDF, invoca una herramienta usando:\n"
-		"<tool_call>\n"
-		'{"name": "<nombre_herramienta>", "arguments": {<argumentos>}}\n'
-		"</tool_call>\n\n"
-		"Herramientas:\n"
-		"- search_web(query: string): Busca información en internet.\n"
-		"- read_url(url: string): Extrae y lee una página web en formato markdown.\n"
-		"- read_pdf(url: string): Extrae y lee un documento PDF en una URL.\n\n"
-		"Si no requieres herramientas, responde directamente con naturalidad y precisión."
+		"La marca de tiempo al inicio de los mensajes indica la fecha y hora local actual del usuario (Europe/Madrid). A partir de ella calcula directamente días como hoy, mañana o ayer sin pedir confirmación de fechas.\n"
+		"Dispones de herramientas nativas (como search_web) para consultar datos en tiempo real (meteorología, noticias o datos recientes). Úsalas directamente cuando te consulten sobre el tiempo o información actualizada.\n"
+		"NUNCA repitas marcas de tiempo ni encabezados entre corchetes en tus respuestas. Responde con naturalidad, precisión y brevedad."
 	)
 
 def ensure_system_prompt(messages: list[dict]) -> list[dict]:

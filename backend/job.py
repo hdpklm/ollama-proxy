@@ -24,6 +24,7 @@ class Job:
 	seq: int = 0
 	prompt: str = ""
 	partial: str = ""
+	tool_calls: list = field(default_factory=list)
 	generated: int = 0
 	cancelled: bool = False
 	times_paused: int = 0

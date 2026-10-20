@@ -10,14 +10,19 @@ from services.llm_client import LLMClient
 from services.tts_client import TTSClient
 from services.sentence_chunker import SentenceChunker
 from services.tool_executor import extract_tool_call, execute_tool
+from services.tool_definitions import NATIVE_TOOLS
 from config import settings, ensure_system_prompt, load_default_system_prompt
 
 def stamp(text: str) -> str:
+	dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+	meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 	try:
 		now = datetime.now(ZoneInfo("Europe/Madrid"))
 	except Exception:
 		now = datetime.now().astimezone()
-	return f"[Hora local actual del usuario: {now:%A %Y-%m-%d %H:%M} {now.tzname()}]\n{text}"
+	dia_nombre = dias[now.weekday()]
+	mes_nombre = meses[now.month - 1]
+	return f"[Fecha y hora actual: {dia_nombre} {now.day} de {mes_nombre} de {now.year}, {now.hour:02d}:{now.minute:02d} {now.tzname()}]\n{text}"
 
 router = APIRouter(tags=["call"])
 
@@ -60,68 +65,83 @@ async def websocket_call_endpoint(websocket: WebSocket):
 		await websocket.send_json({"type": "assistant_thinking"})
 
 		max_tool_steps = 3
+		executed_tools = []
 		for _ in range(max_tool_steps):
 			chunker = SentenceChunker(min_words=3, max_words=20)
 			accumulated_full_text = ""
+			accumulated_tool_calls = []
 			chunk_index = 0
-			buffered_tokens = []
 			is_streaming_to_tts = False
 
 			try:
-				async for token in llm_service.stream_chat(conversation_history):
+				async for chunk in llm_service.stream_chat(conversation_history, tools=NATIVE_TOOLS, priority=True, fast=True):
+					if isinstance(chunk, dict):
+						if "tool_calls" in chunk:
+							accumulated_tool_calls.extend(chunk["tool_calls"])
+						continue
+
+					token = str(chunk)
 					accumulated_full_text += token
 
-					if not is_streaming_to_tts:
-						buffered_tokens.append(token)
-						joined = "".join(buffered_tokens).strip()
-
-						if "<tool_call>".startswith(joined) and len(joined) < len("<tool_call>"):
-							continue
-						elif joined.startswith("<tool_call>"):
-							if "</tool_call>" in "".join(buffered_tokens):
-								break
-							continue
+					# Never stream echoed bracketed header or tool_call tags to user or TTS
+					if accumulated_full_text.startswith("["):
+						if "]" in accumulated_full_text:
+							accumulated_full_text = re.sub(r"^\[[^\]]+\]\s*", "", accumulated_full_text)
 						else:
-							is_streaming_to_tts = True
-							for bt in buffered_tokens:
-								await websocket.send_json({"type": "assistant_token", "token": bt})
-								for sentence in chunker.push_token(bt):
-									chunk_index += 1
-									if tts_mode == "rpi5":
-										audio_bytes = await tts_service.synthesize(sentence)
-										if audio_bytes:
-											await websocket.send_json({
-												"type": "assistant_audio_chunk",
-												"chunk_index": chunk_index,
-												"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
-												"text": sentence
-											})
-									else:
-										await websocket.send_json({"type": "assistant_sentence", "chunk_index": chunk_index, "text": sentence})
-							buffered_tokens.clear()
-					else:
-						await websocket.send_json({"type": "assistant_token", "token": token})
-						for sentence in chunker.push_token(token):
-							chunk_index += 1
-							if tts_mode == "rpi5":
-								audio_bytes = await tts_service.synthesize(sentence)
-								if audio_bytes:
-									await websocket.send_json({
-										"type": "assistant_audio_chunk",
-										"chunk_index": chunk_index,
-										"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
-										"text": sentence
-									})
-							else:
-								await websocket.send_json({"type": "assistant_sentence", "chunk_index": chunk_index, "text": sentence})
+							continue
 
+					if "<tool_call" in accumulated_full_text:
+						if "</tool_call>" in accumulated_full_text:
+							break
+						continue
+
+					is_streaming_to_tts = True
+					await websocket.send_json({"type": "assistant_token", "token": token})
+					for sentence in chunker.push_token(token):
+						chunk_index += 1
+						if tts_mode == "rpi5":
+							audio_bytes = await tts_service.synthesize(sentence)
+							if audio_bytes:
+								await websocket.send_json({
+									"type": "assistant_audio_chunk",
+									"chunk_index": chunk_index,
+									"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+									"text": sentence
+								})
+						else:
+							await websocket.send_json({"type": "assistant_sentence", "chunk_index": chunk_index, "text": sentence})
+
+				# 1. Native OpenAI tool calls handling
+				if accumulated_tool_calls:
+					assistant_msg = {"role": "assistant", "content": None, "tool_calls": accumulated_tool_calls}
+					conversation_history.append(assistant_msg)
+					for tc in accumulated_tool_calls:
+						fn = tc.get("function", {})
+						fn_name = fn.get("name", "")
+						raw_args = fn.get("arguments", {})
+						fn_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+						print(f"[WS Call] Native tool call detected: {fn_name} args={fn_args}")
+						await websocket.send_json({"type": "assistant_status", "status": f"Consultando herramienta {fn_name}..."})
+						tool_result = await execute_tool(fn_name, fn_args)
+						executed_tools.append({"tool": fn_name, "args": fn_args})
+						conversation_history.append({
+							"role": "tool",
+							"tool_call_id": tc.get("id", "call_1"),
+							"name": fn_name,
+							"content": tool_result
+						})
+					continue
+
+				# 2. Text fallback tool calls handling
 				tool_name, tool_args, tool_raw = extract_tool_call(accumulated_full_text)
 				if tool_name and tool_raw:
+					print(f"[WS Call] Text fallback tool call detected: {tool_name} args={tool_args}")
 					await websocket.send_json({
 						"type": "assistant_status",
 						"status": f"Consultando herramienta {tool_name}..."
 					})
 					tool_result = await execute_tool(tool_name, tool_args or {})
+					executed_tools.append({"tool": tool_name, "args": tool_args})
 					conversation_history.append({"role": "assistant", "content": tool_raw})
 					conversation_history.append({"role": "user", "content": f"[Resultado de herramienta {tool_name}]:\n{tool_result}"})
 					continue
@@ -144,9 +164,11 @@ async def websocket_call_endpoint(websocket: WebSocket):
 				conversation_history.append({"role": "assistant", "content": accumulated_full_text})
 				await websocket.send_json({
 					"type": "assistant_done",
-					"full_text": accumulated_full_text
+					"full_text": accumulated_full_text,
+					"tools_used": executed_tools
 				})
 				break
+
 
 			except asyncio.CancelledError:
 				break
@@ -375,70 +397,90 @@ async def websocket_stt_endpoint(websocket: WebSocket):
 async def websocket_chat_endpoint(websocket: WebSocket):
 	await websocket.accept()
 	current_stream_task: asyncio.Task | None = None
-	async def stream_tokens(messages: list, model: str, tts_mode: str = "rpi5"):
+	async def stream_tokens(messages: list, model: str, tts_mode: str = "rpi5", priority: bool = False, fast: bool = True):
 		max_tool_steps = 3
+		last_usage = None
+		executed_tools = []
 		for _ in range(max_tool_steps):
 			accumulated = ""
+			accumulated_tool_calls = []
 			chunker = SentenceChunker(min_words=2, max_words=20)
 			chunk_index = 0
-			buffered_tokens = []
 			is_streaming = False
 
 			try:
-				async for token in llm_service.stream_chat(messages, model=model):
+				async for chunk in llm_service.stream_chat(messages, model=model, tools=NATIVE_TOOLS, priority=priority, fast=fast):
+					if isinstance(chunk, dict):
+						if "tool_calls" in chunk:
+							accumulated_tool_calls.extend(chunk["tool_calls"])
+						elif chunk.get("type") == "usage":
+							last_usage = chunk
+							await websocket.send_json(chunk)
+						continue
+
+					token = str(chunk)
 					accumulated += token
 
-					if not is_streaming:
-						buffered_tokens.append(token)
-						joined = "".join(buffered_tokens).strip()
-
-						if "<tool_call>".startswith(joined) and len(joined) < len("<tool_call>"):
-							continue
-						elif joined.startswith("<tool_call>"):
-							if "</tool_call>" in "".join(buffered_tokens):
-								break
-							continue
+					# Never stream echoed bracketed header or tool_call tags to user or TTS
+					if accumulated.startswith("["):
+						if "]" in accumulated:
+							accumulated = re.sub(r"^\[[^\]]+\]\s*", "", accumulated)
 						else:
-							is_streaming = True
-							for bt in buffered_tokens:
-								await websocket.send_json({"type": "token", "token": bt})
-								for sentence in chunker.push_token(bt):
-									chunk_index += 1
-									if tts_mode == "rpi5":
-										audio_bytes = await tts_service.synthesize(sentence)
-										if audio_bytes:
-											await websocket.send_json({
-												"type": "audio_chunk",
-												"chunk_index": chunk_index,
-												"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
-												"text": sentence
-											})
-									else:
-										await websocket.send_json({"type": "tts_sentence", "chunk_index": chunk_index, "text": sentence})
-							buffered_tokens.clear()
-					else:
-						await websocket.send_json({"type": "token", "token": token})
-						for sentence in chunker.push_token(token):
-							chunk_index += 1
-							if tts_mode == "rpi5":
-								audio_bytes = await tts_service.synthesize(sentence)
-								if audio_bytes:
-									await websocket.send_json({
-										"type": "audio_chunk",
-										"chunk_index": chunk_index,
-										"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
-										"text": sentence
-									})
-							else:
-								await websocket.send_json({"type": "tts_sentence", "chunk_index": chunk_index, "text": sentence})
+							continue
 
+					if "<tool_call" in accumulated:
+						if "</tool_call>" in accumulated:
+							break
+						continue
+
+					is_streaming = True
+					await websocket.send_json({"type": "token", "token": token})
+					for sentence in chunker.push_token(token):
+						chunk_index += 1
+						if tts_mode == "rpi5":
+							audio_bytes = await tts_service.synthesize(sentence)
+							if audio_bytes:
+								await websocket.send_json({
+									"type": "audio_chunk",
+									"chunk_index": chunk_index,
+									"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+									"text": sentence
+								})
+						else:
+							await websocket.send_json({"type": "tts_sentence", "chunk_index": chunk_index, "text": sentence})
+
+				# 1. Native OpenAI tool calls handling
+				if accumulated_tool_calls:
+					assistant_msg = {"role": "assistant", "content": None, "tool_calls": accumulated_tool_calls}
+					messages.append(assistant_msg)
+					for tc in accumulated_tool_calls:
+						fn = tc.get("function", {})
+						fn_name = fn.get("name", "")
+						raw_args = fn.get("arguments", {})
+						fn_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+						print(f"[WS Chat] Native tool call detected: {fn_name} args={fn_args}")
+						await websocket.send_json({"type": "tool_calling", "tool": fn_name, "args": fn_args})
+						tool_result = await execute_tool(fn_name, fn_args)
+						executed_tools.append({"tool": fn_name, "args": fn_args})
+						messages.append({
+							"role": "tool",
+							"tool_call_id": tc.get("id", "call_1"),
+							"name": fn_name,
+							"content": tool_result
+						})
+					continue
+
+				# 2. Text fallback tool calls handling
 				tool_name, tool_args, tool_raw = extract_tool_call(accumulated)
 				if tool_name and tool_raw:
+					print(f"[WS Chat] Text fallback tool call detected: {tool_name} args={tool_args}")
 					await websocket.send_json({
 						"type": "tool_calling",
-						"tool": tool_name
+						"tool": tool_name,
+						"args": tool_args
 					})
 					tool_result = await execute_tool(tool_name, tool_args or {})
+					executed_tools.append({"tool": tool_name, "args": tool_args})
 					messages.append({"role": "assistant", "content": tool_raw})
 					messages.append({"role": "user", "content": f"[Resultado de herramienta {tool_name}]:\n{tool_result}"})
 					continue
@@ -458,10 +500,17 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 						else:
 							await websocket.send_json({"type": "tts_sentence", "chunk_index": chunk_index, "text": sentence})
 
-				await websocket.send_json({
+				done_msg = {
 					"type": "done",
-					"full_text": accumulated
-				})
+					"full_text": accumulated,
+					"tools_used": executed_tools
+				}
+				if last_usage:
+					done_msg["usage"] = last_usage.get("usage")
+					done_msg["priority"] = last_usage.get("priority")
+					done_msg["times_paused"] = last_usage.get("times_paused")
+					done_msg["kv_cache_ram_mb"] = last_usage.get("kv_cache_ram_mb")
+				await websocket.send_json(done_msg)
 				break
 
 			except asyncio.CancelledError:
@@ -486,19 +535,21 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 				raw_messages = data.get("messages", [])
 				model = data.get("model", settings.LLM_MODEL)
 				tts_mode = data.get("tts_mode", "rpi5")
+				priority = bool(data.get("priority", False))
+				fast = bool(data.get("fast", True))
 				if raw_messages:
 					messages = []
 					for m in raw_messages:
 						if m.get("role") == "user":
 							user_text = m.get("content", "")
-							if not user_text.startswith("[Hora local"):
+							if not user_text.startswith(("[Fecha y hora", "[Hora local")):
 								messages.append({"role": "user", "content": stamp(user_text)})
 							else:
 								messages.append(m)
 						else:
 							messages.append(m)
 					messages = ensure_system_prompt(messages)
-					current_stream_task = asyncio.create_task(stream_tokens(messages, model, tts_mode))
+					current_stream_task = asyncio.create_task(stream_tokens(messages, model, tts_mode, priority=priority, fast=fast))
 			elif msg_type == "stop":
 				if current_stream_task and not current_stream_task.done():
 					current_stream_task.cancel()
