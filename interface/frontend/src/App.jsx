@@ -54,9 +54,9 @@ export default function App() {
 	const callHook = useVoiceCall(settings)
 
 	return (
-		<div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 select-none overflow-hidden">
+		<div className="flex flex-col h-full h-dvh w-full bg-slate-950 text-slate-100 select-none overflow-hidden">
 			{/* Top Bar Navigation */}
-			<header className="flex items-center justify-between px-6 py-3 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md z-20">
+			<header className="flex-shrink-0 flex items-center justify-between px-3 sm:px-6 py-2.5 sm:py-3 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md z-20">
 				<div className="flex items-center gap-2.5">
 					<div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-md shadow-sky-500/20">
 						<Sparkles className="w-4 h-4 text-white" />
@@ -122,7 +122,7 @@ export default function App() {
 			</header>
 
 			{/* Main Content Area */}
-			<main className="flex-1 relative overflow-hidden">
+			<main className="flex-1 min-h-0 relative overflow-hidden">
 				{activeTab === "call" ? (
 					<CallView callHook={callHook} />
 				) : (

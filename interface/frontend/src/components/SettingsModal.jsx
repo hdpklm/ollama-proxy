@@ -5,10 +5,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onUpdateSetti
 	if (!isOpen) return null
 
 	return (
-		<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-			<div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 text-slate-100">
+		<div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in overflow-hidden">
+			<div className="relative w-full max-w-md max-h-[88dvh] flex flex-col bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-4 sm:p-6 text-slate-100">
 				{/* Header */}
-				<div className="flex items-center justify-between pb-4 border-b border-slate-800">
+				<div className="flex-shrink-0 flex items-center justify-between pb-3 sm:pb-4 border-b border-slate-800">
 					<div className="flex items-center gap-2.5">
 						<div className="p-2 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20">
 							<Sliders className="w-5 h-5" />
@@ -27,7 +27,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onUpdateSetti
 				</div>
 
 				{/* Options List */}
-				<div className="space-y-5 my-5">
+				<div className="flex-1 min-h-0 overflow-y-auto space-y-4 my-3 sm:my-4 pr-1 sm:pr-1.5">
 					{/* Option 1: TTS */}
 					<div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80">
 						<label className="flex items-start gap-3 cursor-pointer">
@@ -164,7 +164,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onUpdateSetti
 				</div>
 
 				{/* Footer */}
-				<div className="pt-3 border-t border-slate-800 flex justify-end">
+				<div className="flex-shrink-0 pt-3 border-t border-slate-800 flex justify-end">
 					<button
 						onClick={onClose}
 						className="px-4 py-2 text-xs font-medium rounded-xl bg-sky-600 hover:bg-sky-500 text-white transition-colors"

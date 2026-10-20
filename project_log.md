@@ -735,3 +735,20 @@
 		2. Se anadieron sysctls de red a cada contenedor (`net.ipv6.conf.all.disable_ipv6=1` y `net.ipv6.conf.default.disable_ipv6=1`) para deshabilitar la pila IPv6 dentro de los contenedores.
 		3. Se configuro `enable_ipv6: false` explicitamente en la definicion de la red bridge `ollama-net`.
 	- Actualizada la version a `v0.7.41` en `project_status.md`.
+
+### 📝 Registro: [v0.7.42] - Ajuste de scroll y responsividad movil en modal de ajustes y vistas
+- **date-time**: 2026-10-20 19:22:00
+- **Problema**:
+	- En dispositivos moviles, el modal de configuracion (SettingsModal) excedia la altura de la pantalla ocultando el encabezado (boton de cierre) y el pie (boton Guardar y Cerrar) sin permitir scroll interior.
+	- Las vistas de Chat y Call tenian scroll en el body de la pagina, provocando que en Chat colapsara con el scroll propio de la lista de mensajes y que en Call se pudiera desplazar verticalmente la pantalla sin necesidad.
+- **Causa**:
+	- `SettingsModal` no poseia limite de altura maxima (`max-h`) ni `overflow-y-auto` en el contenedor de opciones, provocando desborde fuera del viewport.
+	- El elemento `body` y contenedor raiz tenian `overflow-x: hidden` y `min-h-screen` en lugar de `overflow: hidden`, `overscroll-behavior: none` y `100dvh`.
+	- En `ChatView`, el contenedor principal no tenia `min-h-0` ni delimitaba el scroll exclusivamente a la lista de mensajes.
+- **Solución**:
+	- `interface/frontend/src/index.css` e `index.html`: fijado `overflow: hidden`, `overscroll-behavior: none` y `100dvh` en `html`, `body` y `#root`, eliminando por completo el scroll en el body.
+	- `interface/frontend/src/App.jsx`: configurado `h-full h-dvh w-full`, cabecera fija con `flex-shrink-0` y `main` restringido con `min-h-0 overflow-hidden`.
+	- `interface/frontend/src/components/SettingsModal.jsx`: estructurado con `max-h-[88dvh] flex flex-col`, cabecera y pie fijos con `flex-shrink-0` y el listado de opciones con `flex-1 min-h-0 overflow-y-auto`.
+	- `interface/frontend/src/components/ChatView.jsx`: aislado con `min-h-0 overflow-hidden` y barra de entrada inferior con `flex-shrink-0`, manteniendo el scroll unicamente en la lista de mensajes.
+	- `interface/frontend/src/components/CallView.jsx` y `AudioVisualizer.jsx`: restringidos con `overflow-hidden` y dimensiones responsivas optimizadas para pantallas moviles.
+	- Incrementada la version a `v0.7.42` en `project_status.md`.

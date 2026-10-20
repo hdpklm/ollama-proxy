@@ -489,9 +489,9 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	}, [])
 
 	return (
-		<div className="flex flex-col h-full max-w-3xl mx-auto px-4 py-4">
+		<div className="flex flex-col h-full max-w-3xl mx-auto px-3 sm:px-4 py-2.5 sm:py-4 min-h-0 overflow-hidden">
 			{/* Messages Container */}
-			<div className="flex-1 overflow-y-auto space-y-4 pr-1">
+			<div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
 				{messages.map((msg, index) => (
 					<div
 						key={index}
@@ -581,7 +581,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 			</div>
 
 			{/* Input Bar */}
-			<div className="mt-4 pt-3 border-t border-slate-800/80">
+			<div className="flex-shrink-0 mt-2 sm:mt-4 pt-2.5 sm:pt-3 border-t border-slate-800/80">
 				<form
 					onSubmit={(e) => {
 						e.preventDefault()

@@ -7,12 +7,17 @@
 	color-scheme: dark;
 }
 
-body {
+html,
+body,
+#root {
+	height: 100%;
+	height: 100dvh;
 	margin: 0;
 	padding: 0;
 	background-color: #020617;
 	color: #f8fafc;
-	overflow-x: hidden;
+	overflow: hidden;
+	overscroll-behavior: none;
 }
 
 /* Custom scrollbars */

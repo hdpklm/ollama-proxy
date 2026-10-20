@@ -18,7 +18,7 @@ export default function CallView({ callHook }) {
 	} = callHook
 
 	return (
-		<div className="flex flex-col items-center justify-between h-full max-w-xl mx-auto px-4 py-6">
+		<div className="flex flex-col items-center justify-between h-full max-w-xl mx-auto px-4 py-3 sm:py-6 overflow-hidden select-none">
 			{/* Header info */}
 			<div className="flex flex-col items-center text-center">
 				<div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-slate-800/80 border border-slate-700/60 mb-2">

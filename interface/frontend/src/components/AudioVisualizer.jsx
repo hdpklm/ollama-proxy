@@ -2,7 +2,7 @@ import React from "react"
 
 export default function AudioVisualizer({ isActive, isAssistantSpeaking, isListening }) {
 	return (
-		<div className="relative flex items-center justify-center w-48 h-48 sm:w-64 sm:h-64 my-6">
+		<div className="relative flex items-center justify-center w-40 h-40 sm:w-64 sm:h-64 my-3 sm:my-6">
 			{/* Outer pulsing ring */}
 			<div
 				className={`absolute inset-0 rounded-full transition-all duration-700 ${
