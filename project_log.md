@@ -766,3 +766,43 @@
 		3. En el WebSocket de chat (`/ws/chat`), se anadio el formateo automatico con `stamp(user_text)` a los mensajes con rol `user` antes de remitirlos al streaming del LLM.
 	- En `interface/backend/routes/chat.py`: se incorporo la transformacion con `stamp` en el endpoint REST `/api/chat`.
 	- Actualizada la version a `v0.7.43` en `project_status.md`.
+
+### 📝 Registro: [v0.8.0] - Microservicio Web-Tools (Parallel/DDG, Reader & PDF to Markdown), Redis RAG y Prompt Markdown
+- **date-time**: 2026-10-20 20:00:00
+- **Problema**:
+	- Se requeria inyectar un system prompt predeterminado en Markdown si los mensajes no traen uno, evitando instrucciones obvias o redundantes sobre la hora.
+	- Se necesitaba dotar al sistema de busqueda en linea (con soporte de Parallel API mediante API Key y fallback a DuckDuckGo), lectura/extraccion de articulos web a Markdown y conversion de documentos PDF a Markdown, todo en un contenedor Docker modular por categorias, junto con cache RAG en Redis para acelerar consultas.
+- **Causa**:
+	- El backend de interfaz no disponia de herramientas de navegacion o extraccion de fuentes externas ni de un servicio de persistencia en cache para consultas recurrentes.
+- **Solución**:
+	- Creado `interface/backend/system_prompt.md` e integrado en `config.py` (`load_default_system_prompt`, `ensure_system_prompt`) para inyeccion automatica al inicio de la conversacion.
+	- Creado el microservicio desacoplado `dockers/web-tools`:
+		- `main.py`: expone endpoints `/search` (con soporte para Parallel API con header `x-api-key` y fallback a DuckDuckGo), `/read` (extraccion de paginas web a Markdown limpio usando `trafilatura` y `markdownify`) y `/pdf` (extraccion de paginas PDF a Markdown estructurado con `pypdf`).
+		- `Dockerfile` y `pyproject.toml` propios ejecutandose en el puerto 7000.
+	- Actualizado `docker-compose.yml`:
+		- Anadidos los servicios `web-tools` y `redis` (`redis:7-alpine`) en la red interna `ollama-net` con IPv4 pura y `enable_ipv6: false`.
+		- Anadido volumen `redis-data`.
+	- En `interface/backend`:
+		- `services/rag_service.py`: cache asincrona sobre Redis con fallback en memoria local.
+		- `services/web_tools_client.py`: cliente de busqueda, lectura web y PDF con cache RAG integrada.
+		- `routes/web_tools.py`: endpoints REST `/api/tools/search`, `/api/tools/read` y `/api/tools/pdf`.
+		- Integrado grounding reactivo en `routes/call_ws.py` y `routes/chat.py` para enriquecer automaticamente las consultas con contexto web o PDF cuando se incluyan URLs o intencion de busqueda.
+	- Actualizados `build.bat` y `send.bat` con la opcion `[w]` para compilar y transferir `web-tools:latest` a la RPi5.
+	- Incrementada la version a `v0.8.0` en `project_status.md`.
+
+### 📝 Registro: [v0.8.1] - Tool-calling autonomo para el LLM, RAG vectorial con metadatos en Redis Stack y desacople de API Key Parallel
+- **date-time**: 2026-10-20 20:55:00
+- **Problema**:
+	- El volumen de persistencia de Redis utilizaba un volumen con nombre en Docker Compose en lugar del directorio compartido del host `/docker/storage/redis`.
+	- Los prompts del sistema (tanto en `system_prompt.md` como en el fallback de `config.py`) no incluian los esquemas de herramientas para tool-calling.
+	- El cliente `WebToolsClient` inyectaba la clave de API de Parallel indebidamente en peticiones de lectura de paginas web (`/read`) y procesamiento de PDF (`/pdf`).
+	- El servicio RAG en Redis solo actuaba como cache clave-valor simple sin capacidades de busqueda vectorial ni metadatos.
+	- La orquestacion de herramientas en `call_ws.py` y `chat.py` interceptaba cadenas con palabras clave tipo C++ (`busca `, `búscame `) y expresiones regulares en lugar de permitir que el LLM detectase y decidiese autonomamente cuando llamar a una herramienta.
+- **Causa**:
+	- Implementacion preliminar con interceptacion heuristica de texto del usuario previa a la inferencia del modelo y configuracion de Redis 7 estándar sin modulo RediSearch.
+- **Solución**:
+	- `docker-compose.yml`: Se actualizo la imagen de Redis a `redis/redis-stack-server:latest`, se mapeo el volumen directamente a `/docker/storage/redis:/data` y se eliminaron los volumenes nombrados de la raiz.
+	- `system_prompt.md` y `config.py`: Se definieron formalmente las especificaciones y firmas de herramientas (`search_web`, `read_url`, `read_pdf`) bajo el formato estructurado `<tool_call>{"name": "...", "arguments": {...}}</tool_call>`.
+	- `services/web_tools_client.py`: Se elimino el paso de `x-api-key` en `/read` y `/pdf`, restringiendo la clave de Parallel exclusivamente a `/search`.
+	- `services/rag_service.py`: Se implemento el indice RediSearch `idx:rag` con campos `TAG` (`url`, `source`), `TEXT` (`content`, `title`), `NUMERIC` (`timestamp`) y busqueda vectorial KNN (`HNSW`, `FLOAT32`, `COSINE`), con embeddings locales de 128 dimensiones normalizados e indexacion automatica de documentos consultados.
+	- `services/tool_executor.py`, `routes/call_ws.py` y `routes/chat.py`: Se elimino toda heuristica rigida basada en palabras clave. Se implemento un bucle agentico autonomo que detecta cuando el LLM emite `<tool_call>`, ejecuta la herramienta correspondiente, realimenta la conversacion con los resultados como observacion y sintetiza la respuesta final grounded sin interrumpir la emision hacia TTS.

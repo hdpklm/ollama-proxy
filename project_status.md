@@ -1,9 +1,13 @@
-# Project Status - Ollama Priority Proxy v0.7.43
+# Project Status - Ollama Priority Proxy v0.8.1
 
-## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Interface Voice/Chat Module (PWA) + Standalone TTS/STT Services
-Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, modulo desacoplado de interfaz web PWA instalable en Android/navegador (React + Vite + Tailwind + Service Worker + Manifest), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS), microservicios independientes para Piper TTS y Vosk STT, y scripts desacoplados de compilacion local (`build.bat`) y transferencia directa SSH (`send.bat`).
+## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Interface Voice/Chat Module (PWA) + Standalone TTS/STT Services + Standalone Web-Tools + Redis Stack Vector RAG
+Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, modulo desacoplado de interfaz web PWA instalable en Android/navegador (React + Vite + Tailwind + Service Worker + Manifest), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS), microservicios independientes para Piper TTS, Vosk STT y Web-Tools (Parallel/DDG search, trafilatura reader y PDF extractor), persistencia y búsqueda vectorial RAG en Redis Stack con almacenamiento persistente en `/docker/storage/redis`, tool-calling autónomo gobernado por el propio LLM, y scripts desacoplados de compilacion local (`build.bat`) y transferencia directa SSH (`send.bat`).
 
 ## Mapeo de Modulos y Responsabilidades
+### `dockers/web-tools`
+- `main.py`: Microservicio FastAPI que expone en puerto 7000 busqueda web (Parallel API / DDG), extraccion de articulos a Markdown (`trafilatura`/`markdownify`) y conversion de PDF a Markdown (`pypdf`).
+- `Dockerfile`: Contenedor independiente con Python 3.11, gestor `uv` y cache compartida.
+
 ### `dockers/piper`
 - `main.py`: Microservicio FastAPI que expone Piper TTS en el puerto 5000 (HTTP GET/POST) descargando automaticamente modelos ONNX en espanol a cache local.
 - `Dockerfile`: Contenedor independiente con Python 3.11, gestor `uv` y cache compartida.
@@ -14,9 +18,14 @@ Proxy HTTP y planificador de tokens por turno estricto con contextos KV independ
 
 ### `interface/backend`
 - `main.py`: Inicializa la aplicacion FastAPI del modulo interface, monta rutas REST/WebSocket y sirve los estaticos compilados de `frontend/dist`.
-- `config.py`: Centraliza variables de entorno para endpoints externos de LLM, STT, TTS y puerto del servidor.
-- `routes/chat.py`: Endpoints REST para interaccion asincrona en modo chat (envio de texto, audio con reproduccion y sintesis).
-- `routes/call_ws.py`: Handlers WebSocket para llamadas de voz (/ws/call), dictado STT en streaming (/ws/stt) y generacion token a token de chat (/ws/chat).
+- `config.py`: Centraliza variables de entorno para endpoints externos de LLM, STT, TTS, Web-Tools y Redis, e inyeccion de `system_prompt.md` con especificaciones de tool-calling.
+- `system_prompt.md`: Plantilla Markdown de instrucciones de sistema con especificación y esquemas de herramientas disponibles para tool-calling autónomo.
+- `routes/chat.py`: Endpoints REST para interaccion chat con bucle agéntico de tool-calling autónomo (`<tool_call>`) y sellado temporal.
+- `routes/call_ws.py`: Handlers WebSocket para llamadas de voz (/ws/call), dictado STT en streaming (/ws/stt) y generacion token a token de chat (/ws/chat) con detección de tool-calling y streaming reactivo a TTS.
+- `routes/web_tools.py`: Endpoints REST `/api/tools/search`, `/api/tools/read` y `/api/tools/pdf`.
+- `services/tool_executor.py`: Extrae bloques `<tool_call>` emitidos por el LLM, ejecuta herramientas de búsqueda, lectura web o PDF e indexa el contenido.
+- `services/web_tools_client.py`: Cliente asincrono hacia `web-tools` con autenticación Parallel exclusiva en búsqueda y desacoplada de lectura/PDF.
+- `services/rag_service.py`: Servicio RAG con búsqueda vectorial RediSearch (`FT.CREATE`, `FT.SEARCH` con KNN y cosine distance) y metadatos (`TAG`, `TEXT`, `NUMERIC`) sobre Redis Stack (`/docker/storage/redis`), con fallback local.
 - `services/llm_client.py`: Cliente asincrono HTTP/streaming hacia el proxy LLM.
 - `services/stt_client.py`: Cliente de transcripcion hacia Vosk (HTTP/WebSocket).
 - `services/tts_client.py`: Cliente de sintesis de voz hacia Piper.
@@ -93,3 +102,15 @@ Proxy HTTP y planificador de tokens por turno estricto con contextos KV independ
 - `[WS] /ws/chat` [Auth: None / Public]:
 	- **Payload Bidireccional**: JSON `{ messages: list, model: str (opcional) }` -> Tokens SSE/JSON `{ type: "token", token: str }` y `{ type: "done", full_text: str }`.
 	- **Descripcion**: Generacion token a token mediante WebSocket para visualizacion progresiva en tiempo real en la interfaz de chat.
+- `[POST] /api/tools/search` [Auth: None / Public]:
+	- **Params / Payload**: `{ query: str, max_results: int (default: 5) }`
+	- **Response**: `{ status: "ok", provider: "parallel" | "duckduckgo", results: [...] }`
+	- **Descripcion**: Busqueda web con Parallel API (si hay API key) o fallback a DuckDuckGo, con cache RAG en Redis.
+- `[POST] /api/tools/read` [Auth: None / Public]:
+	- **Params / Payload**: `{ url: str }`
+	- **Response**: `{ status: "ok", url: str, title: str, markdown: str }`
+	- **Descripcion**: Extraccion y lectura de pagina web convertida a Markdown limpio con trafilatura / markdownify.
+- `[POST] /api/tools/pdf` [Auth: None / Public]:
+	- **Params / Payload**: `Multipart form: file` o JSON `{ url: str }`
+	- **Response**: `{ status: "ok", filename: str, pages: int, markdown: str }`
+	- **Descripcion**: Conversion de documentos PDF a Markdown estructurado por pagina.

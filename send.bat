@@ -20,8 +20,9 @@ if "%TARGET_SVC%"=="" (
 	echo   [p] Solo piper-tts (TTS)
 	echo   [v] Solo vosk-stt (STT)
 	echo   [o] Solo ollama-proxy (Core LLM Proxy)
+	echo   [w] Solo web-tools (Search, Reader & PDF)
 	echo.
-	set /p OPCION="Opcion [*, i, p, v, o o separados por comas]: "
+	set /p OPCION="Opcion [*, i, p, v, o, w o separados por comas]: "
 	if "!OPCION!"=="" set TARGET_SVC=all
 	if "!OPCION!"=="*" set TARGET_SVC=all
 	if "!OPCION!"=="1" set TARGET_SVC=all
@@ -51,6 +52,8 @@ if errorlevel 1 exit /b 1
 call :send_image "piper-tts:latest"
 if errorlevel 1 exit /b 1
 call :send_image "vosk-stt:latest"
+if errorlevel 1 exit /b 1
+call :send_image "web-tools:latest"
 if errorlevel 1 exit /b 1
 goto finished
 
@@ -100,6 +103,18 @@ if /i "%ITEM%"=="proxy" (
 )
 if /i "%ITEM%"=="ollama-proxy" (
 	call :send_image "ollama-proxy:latest"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="w" (
+	call :send_image "web-tools:latest"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="web" (
+	call :send_image "web-tools:latest"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="web-tools" (
+	call :send_image "web-tools:latest"
 	exit /b %errorlevel%
 )
 

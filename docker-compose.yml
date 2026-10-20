@@ -63,6 +63,9 @@ services:
       - STT_URL=http://vosk-stt:2700
       - API_KEY=${PROXY_API_KEY:-cambia_esta_clave}
       - PROXY_API_KEY=${PROXY_API_KEY:-cambia_esta_clave}
+      - WEB_TOOLS_URL=http://web-tools:7000
+      - REDIS_URL=redis://redis:6379/0
+      - PARALLEL_API_KEY=${PARALLEL_API_KEY:-}
       - UV_CACHE_DIR=/root/.cache/uv
     volumes:
       - ./interface/backend/routes:/app/routes
@@ -119,6 +122,43 @@ services:
       - ./modelos/vosk:/app/modelos
       - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
     restart: unless-stopped
+
+  web-tools:
+    # build:
+    #   context: ./dockers/web-tools
+    #   dockerfile: Dockerfile
+    image: web-tools:latest
+    pull_policy: never
+    container_name: web-tools
+    networks:
+      - ollama-net
+    ports:
+      - "0.0.0.0:7000:7000"
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
+    environment:
+      - PORT=7000
+      - PARALLEL_API_KEY=${PARALLEL_API_KEY:-}
+      - UV_CACHE_DIR=/root/.cache/uv
+    volumes:
+      - ./dockers/web-tools/main.py:/app/main.py
+      - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
+    restart: unless-stopped
+
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: redis
+    restart: unless-stopped
+    networks:
+      - ollama-net
+    ports:
+      - "0.0.0.0:6379:6379"
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
+    volumes:
+      - /docker/storage/redis:/data
 
 networks:
   ollama-net:

@@ -11,6 +11,8 @@ tts_service = TTSClient()
 stt_service = STTClient()
 
 from routes.call_ws import stamp
+from services.tool_executor import extract_tool_call, execute_tool
+from config import ensure_system_prompt, settings
 
 class ChatRequest(BaseModel):
 	messages: list[dict]
@@ -27,13 +29,30 @@ async def handle_chat(req: ChatRequest):
 		for m in req.messages:
 			if m.get("role") == "user":
 				user_text = m.get("content", "")
-				if not user_text.startswith("["):
+				if not user_text.startswith("[Hora local"):
 					messages.append({"role": "user", "content": stamp(user_text)})
 				else:
 					messages.append(m)
 			else:
 				messages.append(m)
-		res = await llm_service.chat(messages, model=req.model or "qwen2.5:0.5b")
+		messages = ensure_system_prompt(messages)
+
+		# Autonomous tool calling loop (up to 3 steps)
+		selected_model = req.model or settings.LLM_MODEL or "gemma4:e2b"
+		for _ in range(3):
+			res = await llm_service.chat(messages, model=selected_model)
+			msg = res.get("message", {})
+			content = msg.get("content", "")
+
+			tool_name, tool_args, tool_raw = extract_tool_call(content)
+			if tool_name and tool_raw:
+				tool_result = await execute_tool(tool_name, tool_args or {})
+				messages.append({"role": "assistant", "content": tool_raw})
+				messages.append({"role": "user", "content": f"[Resultado de herramienta {tool_name}]:\n{tool_result}"})
+				continue
+
+			return res
+
 		return res
 	except Exception as e:
 		raise HTTPException(status_code=502, detail=f"LLM proxy error: {str(e)}")

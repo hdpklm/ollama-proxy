@@ -14,8 +14,9 @@ if "%TARGET_SVC%"=="" (
 	echo   [p] Solo piper-tts (TTS)
 	echo   [v] Solo vosk-stt (STT)
 	echo   [o] Solo ollama-proxy (Core LLM Proxy)
+	echo   [w] Solo web-tools (Search, Reader & PDF)
 	echo.
-	set /p OPCION="Opcion [*, i, p, v, o o separados por comas]: "
+	set /p OPCION="Opcion [*, i, p, v, o, w o separados por comas]: "
 	if "!OPCION!"=="" set TARGET_SVC=all
 	if "!OPCION!"=="*" set TARGET_SVC=all
 	if "!OPCION!"=="1" set TARGET_SVC=all
@@ -45,6 +46,8 @@ if errorlevel 1 exit /b 1
 call :build_image "piper-tts:latest" "./dockers/piper"
 if errorlevel 1 exit /b 1
 call :build_image "vosk-stt:latest" "./dockers/vosk"
+if errorlevel 1 exit /b 1
+call :build_image "web-tools:latest" "./dockers/web-tools"
 if errorlevel 1 exit /b 1
 goto finished
 
@@ -94,6 +97,18 @@ if /i "%ITEM%"=="proxy" (
 )
 if /i "%ITEM%"=="ollama-proxy" (
 	call :build_image "ollama-proxy:latest" "."
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="w" (
+	call :build_image "web-tools:latest" "./dockers/web-tools"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="web" (
+	call :build_image "web-tools:latest" "./dockers/web-tools"
+	exit /b %errorlevel%
+)
+if /i "%ITEM%"=="web-tools" (
+	call :build_image "web-tools:latest" "./dockers/web-tools"
 	exit /b %errorlevel%
 )
 

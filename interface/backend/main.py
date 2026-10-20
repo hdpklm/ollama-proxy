@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from config import settings
 from routes.chat import router as chat_router
 from routes.call_ws import router as call_router
+from routes.web_tools import router as web_tools_router
 
 app = FastAPI(title="Voice & Chat LLM Interface", version="0.6.0")
 
@@ -19,6 +20,7 @@ app.add_middleware(
 
 app.include_router(chat_router)
 app.include_router(call_router)
+app.include_router(web_tools_router)
 
 @app.get("/api/health")
 async def health_check():
@@ -28,7 +30,9 @@ async def health_check():
 		"services": {
 			"llm_url": settings.LLM_URL,
 			"tts_url": settings.TTS_URL,
-			"stt_url": settings.STT_URL
+			"stt_url": settings.STT_URL,
+			"web_tools_url": settings.WEB_TOOLS_URL,
+			"redis_url": settings.REDIS_URL
 		}
 	}
 
