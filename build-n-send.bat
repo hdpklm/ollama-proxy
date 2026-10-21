@@ -46,30 +46,30 @@ if "%TARGET_SVC%"=="piper-tts" goto build_piper
 if "%TARGET_SVC%"=="vosk-stt" goto build_vosk
 
 :build_all
-call :process_image "ollama-proxy:latest" "."
+call :process_image "ollama-proxy:RPi5" "."
 if errorlevel 1 exit /b 1
-call :process_image "interface:latest" "./interface"
+call :process_image "interface:RPi5" "./interface"
 if errorlevel 1 exit /b 1
-call :process_image "piper-tts:latest" "./dockers/piper"
+call :process_image "piper-tts:RPi5" "./dockers/piper"
 if errorlevel 1 exit /b 1
-call :process_image "vosk-stt:latest" "./dockers/vosk"
+call :process_image "vosk-stt:RPi5" "./dockers/vosk"
 if errorlevel 1 exit /b 1
 goto finished
 
 :build_proxy
-call :process_image "ollama-proxy:latest" "."
+call :process_image "ollama-proxy:RPi5" "."
 goto finished
 
 :build_interface
-call :process_image "interface:latest" "./interface"
+call :process_image "interface:RPi5" "./interface"
 goto finished
 
 :build_piper
-call :process_image "piper-tts:latest" "./dockers/piper"
+call :process_image "piper-tts:RPi5" "./dockers/piper"
 goto finished
 
 :build_vosk
-call :process_image "vosk-stt:latest" "./dockers/vosk"
+call :process_image "vosk-stt:RPi5" "./dockers/vosk"
 goto finished
 
 :process_image

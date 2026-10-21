@@ -903,3 +903,28 @@
 	- Se refactorizó `services/tool_executor.py` eliminando expresiones regulares legacy y usando un diccionario de registro `TOOL_REGISTRY`, acotando los snippets web para no desbordar la ventana de contexto `n_ctx=2048`.
 	- Se eliminó la carpeta duplicada `interface/backend/adapters`, dejando un único punto de verdad en `services/adapters/`.
 	- Se unificó el bucle de herramientas en `routes/chat.py` y `routes/call_ws.py` delegando íntegramente en el adaptador.
+
+### 📝 Registro: [v0.9.6] - Sistema de Compilación Dual con Tags 'linux' (AMD64 nativo) y 'RPi5' (ARM64)
+- **date-time**: 2026-10-21 02:53:00
+- **Problema**:
+	- En Docker Desktop sobre Windows/Linux x86_64 las imágenes compiladas con `--platform linux/arm64` se ejecutaban bajo emulación QEMU (`qemu-aarch64`), degradando el rendimiento en hasta un 95% (0.42 tps frente a 10-15 tps nativos).
+	- Se solicitó poder compilar las imágenes para Linux local sin emulador y para RPi5 cuando se vayan a desplegar en la Raspberry Pi 5, distinguiendo las versiones mediante tags específicos: `linux` y `RPi5` en lugar del genérico `latest`.
+- **Causa**:
+	- Los scripts anteriores forzaban de forma estática `--platform linux/arm64` y el tag `:latest`.
+- **Solución**:
+	- Se actualizó `docker-compose.yml` para consumir `:${IMAGE_TAG:-linux}` en todos los servicios (`ollama-proxy`, `interface`, `piper-tts`, `vosk-stt`, `web-tools`), configurable dinámicamente mediante `IMAGE_TAG` en `.env` (valor por defecto `linux` en PC y `RPi5` en Raspberry Pi 5).
+	- Se rediseñó `build.bat` para permitir la selección de plataforma (`linux/amd64` con tag `:linux` o `linux/arm64` con tag `:RPi5`), tanto de forma interactiva como mediante parámetros (`build.bat all linux` o `build.bat all rpi5`).
+	- Se creó el script de acceso directo `build-linux.bat` para compilar todo el stack nativo en PC.
+	- Se actualizaron `send.bat`, `build-proxy.bat`, `build-interface.bat`, `build-piper.bat`, `build-vosk.bat` y `build-n-send.bat` para compilar y enviar exclusivamente las imágenes etiquetadas como `:RPi5`.
+
+### 📝 Registro: [v0.9.6] - Migracion de Contenedores Emulados ARM64 a Imagenes Nativas Linux x86_64
+- **date-time**: 2026-10-21 03:00:00
+- **Problema**:
+	- Docker Desktop en Windows ejecutaba los contenedores con emulación QEMU ARM64 a una velocidad extremadamente baja (~0.42 t/s).
+- **Causa**:
+	- Las imágenes compiladas tenían el tag latest y estaban dirigidas exclusivamente a RPi5 (linux/arm64).
+- **Solución**:
+	- Se separó el etiquetado en `:linux` (para x86_64) y `:RPi5` (para Raspberry Pi 5).
+	- Se eliminaron los contenedores antiguos emulados y el contenedor conflictivo `redis`.
+	- Se compilaron y ejecutaron todas las imágenes con arquitectura nativa `linux/amd64` (`ollama-proxy:linux`, `interface:linux`, `web-tools:linux`, `piper-tts:linux`, `vosk-stt:linux`).
+	- La velocidad de generación aumentó de 0.42 t/s a 15.29 t/s (83.2 prompt t/s), completando el flujo completo de tool calling en 21.5s.

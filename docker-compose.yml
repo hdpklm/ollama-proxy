@@ -15,7 +15,7 @@
 services:
   ollama-proxy:
     # build: .
-    image: ollama-proxy:latest
+    image: ollama-proxy:${IMAGE_TAG:-linux}
     pull_policy: never
     container_name: ollama-proxy
     command: uv run --no-sync uvicorn main:app --host 0.0.0.0 --port 8000
@@ -41,7 +41,7 @@ services:
     # build:
     #   context: ./interface
     #   dockerfile: Dockerfile
-    image: interface:latest
+    image: interface:${IMAGE_TAG:-linux}
     pull_policy: never
     container_name: interface
     networks:
@@ -82,7 +82,7 @@ services:
     # build:
     #   context: ./dockers/piper
     #   dockerfile: Dockerfile
-    image: piper-tts:latest
+    image: piper-tts:${IMAGE_TAG:-linux}
     pull_policy: never
     container_name: piper-tts
     networks:
@@ -106,7 +106,7 @@ services:
     # build:
     #   context: ./dockers/vosk
     #   dockerfile: Dockerfile
-    image: vosk-stt:latest
+    image: vosk-stt:${IMAGE_TAG:-linux}
     pull_policy: never
     container_name: vosk-stt
     networks:
@@ -129,7 +129,7 @@ services:
     # build:
     #   context: ./dockers/web-tools
     #   dockerfile: Dockerfile
-    image: web-tools:latest
+    image: web-tools:${IMAGE_TAG:-linux}
     pull_policy: never
     container_name: web-tools
     networks:

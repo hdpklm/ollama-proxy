@@ -45,15 +45,15 @@ for %%I in (%ITEMS%) do (
 goto finished
 
 :send_all
-call :send_image "ollama-proxy:latest"
+call :send_image "ollama-proxy:RPi5"
 if errorlevel 1 exit /b 1
-call :send_image "interface:latest"
+call :send_image "interface:RPi5"
 if errorlevel 1 exit /b 1
-call :send_image "piper-tts:latest"
+call :send_image "piper-tts:RPi5"
 if errorlevel 1 exit /b 1
-call :send_image "vosk-stt:latest"
+call :send_image "vosk-stt:RPi5"
 if errorlevel 1 exit /b 1
-call :send_image "web-tools:latest"
+call :send_image "web-tools:RPi5"
 if errorlevel 1 exit /b 1
 goto finished
 
@@ -62,59 +62,59 @@ set "ITEM=%~1"
 if "%ITEM%"=="*" goto send_all
 if /i "%ITEM%"=="all" goto send_all
 if /i "%ITEM%"=="i" (
-	call :send_image "interface:latest"
+	call :send_image "interface:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="interface" (
-	call :send_image "interface:latest"
+	call :send_image "interface:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="p" (
-	call :send_image "piper-tts:latest"
+	call :send_image "piper-tts:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="piper" (
-	call :send_image "piper-tts:latest"
+	call :send_image "piper-tts:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="piper-tts" (
-	call :send_image "piper-tts:latest"
+	call :send_image "piper-tts:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="v" (
-	call :send_image "vosk-stt:latest"
+	call :send_image "vosk-stt:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="vosk" (
-	call :send_image "vosk-stt:latest"
+	call :send_image "vosk-stt:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="vosk-stt" (
-	call :send_image "vosk-stt:latest"
+	call :send_image "vosk-stt:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="o" (
-	call :send_image "ollama-proxy:latest"
+	call :send_image "ollama-proxy:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="proxy" (
-	call :send_image "ollama-proxy:latest"
+	call :send_image "ollama-proxy:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="ollama-proxy" (
-	call :send_image "ollama-proxy:latest"
+	call :send_image "ollama-proxy:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="w" (
-	call :send_image "web-tools:latest"
+	call :send_image "web-tools:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="web" (
-	call :send_image "web-tools:latest"
+	call :send_image "web-tools:RPi5"
 	exit /b %errorlevel%
 )
 if /i "%ITEM%"=="web-tools" (
-	call :send_image "web-tools:latest"
+	call :send_image "web-tools:RPi5"
 	exit /b %errorlevel%
 )
 
