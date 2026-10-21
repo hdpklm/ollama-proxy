@@ -950,3 +950,17 @@
 	- Añadido botón interactivo con icono `Activity` (y contador de tools con `Wrench`) en el footer de cada respuesta del asistente.
 	- Creado panel desplegable con diseño moderno que detalla: conteo y velocidad TPS de evaluación de prompt, conteo y velocidad TPS de tokens generados, total de tokens, métricas del scheduler (prioridad y pausas), y lista desglosada de herramientas ejecutadas con sus argumentos.
 	- Actualizado `project_status.md` a la versión `v0.9.7`.
+
+### 📝 Registro: [v0.9.8] - Implementacion de Arquitectura de Sub-Agentes Especializados
+- **date-time**: 2026-10-21 16:25:00
+- **Problema**:
+	- El asistente conversacional no disponía de un mecanismo modular para delegar tareas complejas o especializadas (investigación profunda, programación senior o redacción ejecutiva) en sub-agentes independientes con prompts, modelos y temperaturas aisladas.
+- **Causa**:
+	- El bucle agéntico solo contaba con herramientas de búsqueda web y lectura de documentos (`search_web`, `read_url`, `read_pdf`), sin capacidad de orquestación jerárquica de sub-agentes.
+- **Solución**:
+	- Creado `interface/backend/services/sub_agents.py` implementando la clase `SubAgent` y un registro desacoplado de sub-agentes preconfigurados: `researcher` (análisis riguroso), `coder` (ingeniería de software y arquitectura) y `writer` (comunicación formal).
+	- Extendido `interface/backend/services/tool_definitions.py` para exportar dinámicamente las herramientas nativas de delegación (`delegate_to_researcher`, `delegate_to_coder`, `delegate_to_writer`).
+	- Conectado `interface/backend/services/tool_executor.py` para despachar automáticamente las llamadas delegadas a su sub-agente correspondiente vía `SUB_AGENTS`.
+	- Actualizado `interface/backend/system_prompt.md` y `interface/backend/config.py` orientando al modelo orquestador a utilizar estas delegaciones cuando la complejidad lo requiera.
+	- Adaptado `interface/frontend/src/components/ChatView.jsx` para distinguir visualmente las ejecuciones de sub-agentes con badge e icono de bot en el visor de telemetría y métricas.
+	- Actualizado `project_status.md` a la versión `v0.9.8`.

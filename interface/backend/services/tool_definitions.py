@@ -51,3 +51,6 @@ NATIVE_TOOLS = [
 		}
 	}
 ]
+
+from services.sub_agents import get_sub_agent_definitions
+NATIVE_TOOLS.extend(get_sub_agent_definitions())

@@ -58,6 +58,23 @@ TOOL_REGISTRY: Dict[str, Callable[[Dict[str, Any]], Awaitable[str]]] = {
 	"read_pdf": _read_pdf,
 }
 
+from services.sub_agents import SUB_AGENTS
+
+async def _delegate_sub_agent(sub_agent_key: str, args: Dict[str, Any]) -> str:
+	agent = SUB_AGENTS.get(sub_agent_key)
+	if not agent:
+		return f"Error: Sub-agente '{sub_agent_key}' no encontrado."
+	task = str(args.get("task", "")).strip()
+	context = str(args.get("context", "")).strip()
+	if not task:
+		return f"Error: Tarea vacía para sub-agente '{sub_agent_key}'."
+	return await agent.run(task=task, context=context)
+
+for _agent_key in SUB_AGENTS.keys():
+	TOOL_REGISTRY[f"delegate_to_{_agent_key}"] = (
+		lambda k: (lambda args: _delegate_sub_agent(k, args))
+	)(_agent_key)
+
 async def execute_tool(name: str, arguments: Dict[str, Any] | str | None) -> str:
 	if isinstance(arguments, str):
 		try:
@@ -68,6 +85,11 @@ async def execute_tool(name: str, arguments: Dict[str, Any] | str | None) -> str
 		arguments = {}
 
 	handler = TOOL_REGISTRY.get(name)
+	if not handler and name.startswith("delegate_to_"):
+		sub_agent_key = name[len("delegate_to_"):]
+		if sub_agent_key in SUB_AGENTS:
+			return await _delegate_sub_agent(sub_agent_key, arguments)
+
 	if not handler:
 		return f"Error: Herramienta desconocida '{name}'."
 

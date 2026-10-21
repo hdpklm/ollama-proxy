@@ -753,10 +753,18 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 																key={tIdx}
 																className="bg-slate-900/90 border border-slate-800 rounded-lg p-2 text-[11px] font-mono text-slate-300"
 															>
-																<div className="flex items-center justify-between text-sky-400 font-semibold mb-1">
+																<div className="flex items-center justify-between font-semibold mb-1">
 																	<span className="flex items-center gap-1">
-																		<Terminal className="w-3 h-3 text-amber-400" />
-																		{t.tool || "herramienta"}
+																		{t.tool && t.tool.startsWith("delegate_to_") ? (
+																			<Bot className="w-3 h-3 text-purple-400" />
+																		) : (
+																			<Terminal className="w-3 h-3 text-amber-400" />
+																		)}
+																		<span className={t.tool && t.tool.startsWith("delegate_to_") ? "text-purple-300 font-medium" : "text-sky-400"}>
+																			{t.tool && t.tool.startsWith("delegate_to_")
+																				? `Sub-Agente: ${t.tool.replace("delegate_to_", "").toUpperCase()}`
+																				: (t.tool || "herramienta")}
+																		</span>
 																	</span>
 																	{t.step !== undefined && (
 																		<span className="text-[10px] text-slate-500 font-normal">
