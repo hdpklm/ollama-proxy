@@ -52,6 +52,15 @@ def test_cache_workflow():
 	assert new_manager.get_cached_state_by_hash(hash_v1) is None, "Old hash must not be loaded"
 	print("Step 4: Container restart loaded all binary caches to RAM.")
 
+	# 5. Test caller context snapshot stack during sub-agent delegation
+	caller_dummy_state = {"caller_tokens": [1, 2, 3], "kv_mem": b"caller_active_kv"}
+	new_manager.save_snapshot("caller_before_researcher", caller_dummy_state)
+	assert new_manager.get_snapshot("caller_before_researcher") == caller_dummy_state
+	popped_caller = new_manager.pop_snapshot("caller_before_researcher")
+	assert popped_caller == caller_dummy_state
+	assert new_manager.get_snapshot("caller_before_researcher") is None
+	print("Step 5: Caller context preserved in RAM and restored seamlessly.")
+
 	print("\nALL PROMPT CACHE TESTS PASSED SUCCESSFULLY!")
 
 if __name__ == "__main__":

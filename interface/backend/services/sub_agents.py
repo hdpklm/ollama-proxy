@@ -14,6 +14,10 @@ class SubAgent:
 		self.temperature = temperature
 
 	async def run(self, task: str, context: str = "") -> str:
+		snapshot_id = f"caller_before_{self.name}"
+		# Preserve active caller KV context in RAM before running sub-agent
+		await llm_service.save_context_snapshot(snapshot_id=snapshot_id, priority=False)
+
 		messages = [{"role": "system", "content": self.system_prompt}]
 		if context:
 			messages.append({"role": "user", "content": f"Contexto previo:\n{context}\n\nTarea a resolver:\n{task}"})
@@ -34,6 +38,9 @@ class SubAgent:
 			return f"[{self.name}]:\n{content}"
 		except Exception as e:
 			return f"[{self.name}] Error de ejecución: {str(e)}"
+		finally:
+			# Restore caller KV context in RAM immediately so main agent can resume without re-evaluating
+			await llm_service.restore_context_snapshot(snapshot_id=snapshot_id, priority=False)
 
 # Predefined specialized sub-agents
 _RESEARCHER_PROMPT = (

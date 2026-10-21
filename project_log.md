@@ -977,3 +977,17 @@
 	- Añadida precarga automática a memoria RAM al iniciar el contenedor (`load_all_to_ram` y `warmup_defaults`) para que todos los estados conocidos queden residentes en memoria sin latencia de disco.
 	- Integrado en `backend/engine.py` (`create_stream` y `count_prompt_tokens`) restaurando directamente el estado en el contexto (`llm.load_state`), permitiendo omitir la evaluación de la cabecera y calcular únicamente desde los mensajes del usuario en adelante.
 	- Actualizado `project_status.md` a la versión `v0.9.9`.
+
+### 📝 Registro: [v0.9.10] - Congelacion y Restauracion de Contexto en RAM al Delegar en Sub-Agentes
+- **date-time**: 2026-10-21 16:50:00
+- **Problema**:
+	- Cuando el agente principal delegaba una tarea en un sub-agente, la ejecución del sub-agente en el contexto LLM sobreescribía el KV-Cache activo del llamador. Al volver el turno al agente principal, este debía re-calcular y re-evaluar todo su historial previo de tokens desde el principio.
+- **Causa**:
+	- Ausencia de un mecanismo de congelación (snapshot) y restauración inmediata en memoria RAM del estado del contexto del agente llamador durante la delegación en sub-agentes.
+- **Solución**:
+	- Añadidos métodos `save_snapshot` y `pop_snapshot` en `backend/prompt_cache.py` gestionando la pila de estados en memoria RAM.
+	- Implementados `save_context_snapshot` y `restore_context_snapshot` en `backend/engine.py` para capturar y reanudar el KV-Cache en `LlamaEngine`.
+	- Expuestos endpoints REST `/v1/context/snapshot/save` y `/v1/context/snapshot/restore` en `backend/routes.py`.
+	- Conectado `interface/backend/services/llm_client.py` con métodos asíncronos para solicitar congelación y restauración de snapshots al proxy.
+	- Actualizado `SubAgent.run` en `interface/backend/services/sub_agents.py` para congelar el contexto activo del llamador antes de iniciar el sub-agente y restaurarlo inmediatamente en bloque `finally`, permitiendo al agente principal continuar sin re-cálculos de tokens.
+	- Actualizado `project_status.md` a la versión `v0.9.10`.

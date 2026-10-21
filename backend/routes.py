@@ -79,6 +79,36 @@ async def list_models(request: Request):
 	}
 
 
+@router.post("/context/snapshot/save")
+async def save_context_snapshot_endpoint(request: Request):
+	engine = getattr(request.app.state, "engine", None)
+	if not engine:
+		raise HTTPException(status_code=500, detail="Engine not initialized")
+	try:
+		body = await request.json()
+	except Exception:
+		body = {}
+	snapshot_id = body.get("snapshot_id", "caller_agent")
+	priority = bool(body.get("priority", False))
+	success = engine.save_context_snapshot(snapshot_id=snapshot_id, priority=priority)
+	return {"status": "ok" if success else "failed", "snapshot_id": snapshot_id}
+
+
+@router.post("/context/snapshot/restore")
+async def restore_context_snapshot_endpoint(request: Request):
+	engine = getattr(request.app.state, "engine", None)
+	if not engine:
+		raise HTTPException(status_code=500, detail="Engine not initialized")
+	try:
+		body = await request.json()
+	except Exception:
+		body = {}
+	snapshot_id = body.get("snapshot_id", "caller_agent")
+	priority = bool(body.get("priority", False))
+	success = engine.restore_context_snapshot(snapshot_id=snapshot_id, priority=priority)
+	return {"status": "ok" if success else "failed", "snapshot_id": snapshot_id}
+
+
 @router.post("/embeddings")
 async def passthrough_embeddings(request: Request):
 	client = getattr(request.app.state, "client", None)

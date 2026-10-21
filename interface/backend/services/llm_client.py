@@ -154,3 +154,27 @@ class LLMClient:
 				data["message"] = {"role": "assistant", "content": data["response"]}
 				return data
 			return data
+
+	async def save_context_snapshot(self, snapshot_id: str = "caller_agent", priority: bool = False) -> bool:
+		url = f"{self.base_url}/v1/context/snapshot/save"
+		payload = {"snapshot_id": snapshot_id, "priority": priority}
+		headers = self._get_headers()
+		try:
+			async with httpx.AsyncClient(timeout=10.0) as client:
+				resp = await client.post(url, json=payload, headers=headers)
+				return resp.status_code == 200 and resp.json().get("status") == "ok"
+		except Exception as e:
+			print(f"[LLMClient] Warning: Failed to save context snapshot '{snapshot_id}': {e}")
+			return False
+
+	async def restore_context_snapshot(self, snapshot_id: str = "caller_agent", priority: bool = False) -> bool:
+		url = f"{self.base_url}/v1/context/snapshot/restore"
+		payload = {"snapshot_id": snapshot_id, "priority": priority}
+		headers = self._get_headers()
+		try:
+			async with httpx.AsyncClient(timeout=10.0) as client:
+				resp = await client.post(url, json=payload, headers=headers)
+				return resp.status_code == 200 and resp.json().get("status") == "ok"
+		except Exception as e:
+			print(f"[LLMClient] Warning: Failed to restore context snapshot '{snapshot_id}': {e}")
+			return False

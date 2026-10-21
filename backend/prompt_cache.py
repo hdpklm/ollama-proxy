@@ -65,7 +65,22 @@ class PromptCacheManager:
 		self.ram_cache: Dict[str, Dict[str, Any]] = {}
 		# Agent to current hash mapping: agent_name -> current_hash
 		self.agent_hash_map: Dict[str, str] = {}
+		# In-memory caller context snapshots: snapshot_id -> saved LlamaState
+		self.ram_snapshots: Dict[str, Any] = {}
 		self.load_all_to_ram()
+
+	def save_snapshot(self, snapshot_id: str, state: Any):
+		self.ram_snapshots[snapshot_id] = state
+		print(f"[PromptCache] Context snapshot '{snapshot_id}' preserved in RAM.")
+
+	def get_snapshot(self, snapshot_id: str) -> Optional[Any]:
+		return self.ram_snapshots.get(snapshot_id)
+
+	def pop_snapshot(self, snapshot_id: str) -> Optional[Any]:
+		state = self.ram_snapshots.pop(snapshot_id, None)
+		if state:
+			print(f"[PromptCache] Context snapshot '{snapshot_id}' retrieved and popped from RAM.")
+		return state
 
 	@staticmethod
 	def compute_hash(prompt_text: str) -> str:

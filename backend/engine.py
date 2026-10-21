@@ -121,3 +121,25 @@ class LlamaEngine:
 		else:
 			text = choice.get("text") or ""
 			return text, choice.get("finish_reason")
+
+	def save_context_snapshot(self, snapshot_id: str = "caller", priority: bool = False) -> bool:
+		llm = self.llm_high if priority else self.llm_low
+		if hasattr(llm, "save_state"):
+			try:
+				state = llm.save_state()
+				self.prompt_cache.save_snapshot(snapshot_id, state)
+				return True
+			except Exception as e:
+				print(f"[Engine] Failed to save context snapshot '{snapshot_id}': {e}")
+		return False
+
+	def restore_context_snapshot(self, snapshot_id: str = "caller", priority: bool = False) -> bool:
+		llm = self.llm_high if priority else self.llm_low
+		state = self.prompt_cache.pop_snapshot(snapshot_id)
+		if state and hasattr(llm, "load_state"):
+			try:
+				llm.load_state(state)
+				return True
+			except Exception as e:
+				print(f"[Engine] Failed to restore context snapshot '{snapshot_id}': {e}")
+		return False
