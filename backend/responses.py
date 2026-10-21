@@ -34,6 +34,8 @@ def _chunk(job, value="", finish=None, role=False):
 				delta["content"] = value["content"]
 			if "tool_calls" in value and value["tool_calls"] is not None:
 				delta["tool_calls"] = value["tool_calls"]
+			if "reasoning_content" in value and value["reasoning_content"] is not None:
+				delta["reasoning_content"] = value["reasoning_content"]
 		elif value:
 			delta["content"] = str(value)
 		choice = {"index": 0, "delta": delta, "finish_reason": finish}

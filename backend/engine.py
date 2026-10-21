@@ -65,8 +65,7 @@ class LlamaEngine:
 		if messages:
 			if "tools" in job.body and job.body["tools"]:
 				extra_params["tools"] = job.body["tools"]
-			if "tool_choice" in job.body and job.body["tool_choice"]:
-				extra_params["tool_choice"] = job.body["tool_choice"]
+				extra_params["tool_choice"] = job.body.get("tool_choice") or "auto"
 
 			return llm.create_chat_completion(
 				messages=messages,
@@ -89,9 +88,15 @@ class LlamaEngine:
 			delta = choice.get("delta") or {}
 			text = delta.get("content") or ""
 			tool_calls = delta.get("tool_calls")
+			reasoning = delta.get("reasoning_content") or delta.get("thinking")
 			finish = choice.get("finish_reason")
-			if tool_calls:
-				return {"content": text, "tool_calls": tool_calls}, finish
+			if tool_calls or reasoning:
+				res = {"content": text}
+				if tool_calls:
+					res["tool_calls"] = tool_calls
+				if reasoning:
+					res["reasoning_content"] = reasoning
+				return res, finish
 			return text, finish
 		else:
 			text = choice.get("text") or ""

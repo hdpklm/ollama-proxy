@@ -1,7 +1,10 @@
 import json
+import os
 import httpx
 from typing import AsyncGenerator
 from config import settings
+
+DEFAULT_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "600.0"))
 
 class LLMClient:
 	def __init__(self, base_url: str = settings.LLM_URL):
@@ -38,10 +41,11 @@ class LLMClient:
 			payload["temperature"] = temperature
 		if tools:
 			payload["tools"] = tools
+			payload["tool_choice"] = kwargs.get("tool_choice", "auto")
 		payload.update(kwargs)
 		headers = self._get_headers()
 
-		async with httpx.AsyncClient(timeout=60.0) as client:
+		async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
 			async with client.stream("POST", url, json=payload, headers=headers) as response:
 				if response.status_code == 404:
 					fallback_url = f"{self.base_url}/api/chat"
@@ -76,6 +80,9 @@ class LLMClient:
 							tool_calls = delta.get("tool_calls")
 							if tool_calls:
 								yield {"tool_calls": tool_calls}
+							reasoning = delta.get("reasoning_content") or delta.get("thinking")
+							if reasoning:
+								yield {"reasoning_content": reasoning}
 							content = delta.get("content", "")
 							if content:
 								yield content
@@ -123,16 +130,18 @@ class LLMClient:
 			payload["temperature"] = temperature
 		if tools:
 			payload["tools"] = tools
+			payload["tool_choice"] = kwargs.get("tool_choice", "auto")
 		payload.update(kwargs)
 		headers = self._get_headers()
 
-		async with httpx.AsyncClient(timeout=60.0) as client:
+		async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
 			resp = await client.post(url, json=payload, headers=headers)
 			if resp.status_code == 404:
 				fallback_url = f"{self.base_url}/api/chat"
 				resp = await client.post(fallback_url, json=payload, headers=headers)
 
-			resp.raise_for_status()
+			if resp.status_code >= 400:
+				raise RuntimeError(f"LLM proxy {resp.status_code}: {resp.text}")
 			data = resp.json()
 
 			# Preserve all metadata (priority, times_paused, kv_cache_ram_mb, usage) while normalizing message

@@ -11,7 +11,8 @@ tts_service = TTSClient()
 stt_service = STTClient()
 
 from routes.call_ws import stamp
-from services.tool_executor import extract_tool_call, execute_tool
+from services.tool_executor import execute_tool
+from services.adapters import get_adapter
 from config import ensure_system_prompt, settings
 
 class ChatRequest(BaseModel):
@@ -47,61 +48,53 @@ async def handle_chat(req: ChatRequest):
 		# Native OpenAI Tool Calling Loop (up to 3 steps)
 		selected_model = req.model or settings.LLM_MODEL or "gemma4:e2b"
 		executed_tools = []
-		for _ in range(3):
+		debug_events = []
+		for step in range(3):
+			if not settings.HIDE_BACKGROUND:
+				debug_events.append({"stage": "turn_start", "step": step, "model": selected_model, "tools_enabled": step == 0})
 			res = await llm_service.chat(
 				messages,
 				model=selected_model,
-				tools=NATIVE_TOOLS,
+				tools=NATIVE_TOOLS if step == 0 else None,
 				priority=bool(req.priority),
 				fast=bool(req.fast if req.fast is not None else True),
 				max_tokens=req.max_tokens,
 				temperature=req.temperature,
 			)
+			adapter = get_adapter(selected_model)
 			msg = res.get("message", {})
-			tool_calls = msg.get("tool_calls", [])
+			tool_calls = adapter.extract_tool_calls(
+				native_tool_calls=msg.get("tool_calls"),
+				text_content=msg.get("content")
+			)
 
 			if tool_calls:
-				messages.append(msg)
+				if msg.get("tool_calls"):
+					messages.append(msg)
 				for tc in tool_calls:
-					fn = tc.get("function", {})
-					fn_name = fn.get("name", "")
-					raw_args = fn.get("arguments", {})
-					if isinstance(raw_args, str):
-						try:
-							fn_args = json.loads(raw_args)
-						except Exception:
-							fn_args = {"query": raw_args}
-					else:
-						fn_args = raw_args
-					print(f"[REST Chat] Native tool call detected: {fn_name} args={fn_args}")
-					tool_result = await execute_tool(fn_name, fn_args)
-					executed_tools.append({"tool": fn_name, "args": fn_args})
-					messages.append({
-						"role": "tool",
-						"tool_call_id": tc.get("id", "call_1"),
-						"name": fn_name,
-						"content": tool_result
-					})
-				continue
-
-			# Secondary fallback for text tool_call format
-			content = msg.get("content", "") or ""
-			tool_name, tool_args, tool_raw = extract_tool_call(content)
-			if tool_name and tool_raw:
-				print(f"[REST Chat] Text fallback tool call detected: {tool_name} args={tool_args}")
-				tool_result = await execute_tool(tool_name, tool_args or {})
-				executed_tools.append({"tool": tool_name, "args": tool_args})
-				messages.append({"role": "assistant", "content": tool_raw})
-				messages.append({"role": "user", "content": f"[Resultado de herramienta {tool_name}]:\n{tool_result}"})
+					print(f"[REST Chat] Tool call detected ({adapter.name}): {tc.name} args={tc.args}")
+					if not settings.HIDE_BACKGROUND:
+						debug_events.append({"stage": "tool_calling", "tool": tc.name, "args": tc.args, "step": step})
+					tool_result = await execute_tool(tc.name, tc.args)
+					executed_tools.append({"tool": tc.name, "args": tc.args})
+					if not settings.HIDE_BACKGROUND:
+						debug_events.append({"stage": "tool_result", "tool": tc.name, "result": tool_result})
+					messages.extend(adapter.format_tool_response(tc, tool_result))
 				continue
 
 			res["tools_used"] = executed_tools
+			if not settings.HIDE_BACKGROUND:
+				res["debug_events"] = debug_events
 			return res
 
 		res["tools_used"] = executed_tools
+		if not settings.HIDE_BACKGROUND:
+			res["debug_events"] = debug_events
 		return res
 	except Exception as e:
-		raise HTTPException(status_code=502, detail=f"LLM proxy error: {str(e)}")
+		import traceback
+		traceback.print_exc()
+		raise HTTPException(status_code=502, detail=f"LLM proxy error: {repr(e)}")
 
 @router.post("/stt")
 async def handle_stt(file: UploadFile = File(...)):

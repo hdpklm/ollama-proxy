@@ -9,8 +9,9 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from services.llm_client import LLMClient
 from services.tts_client import TTSClient
 from services.sentence_chunker import SentenceChunker
-from services.tool_executor import extract_tool_call, execute_tool
+from services.tool_executor import execute_tool
 from services.tool_definitions import NATIVE_TOOLS
+from services.adapters import get_adapter
 from config import settings, ensure_system_prompt, load_default_system_prompt
 
 def stamp(text: str) -> str:
@@ -61,37 +62,66 @@ async def websocket_call_endpoint(websocket: WebSocket):
 			current_task = None
 
 	async def run_assistant_pipeline(user_text: str):
+		adapter = get_adapter(settings.LLM_MODEL)
 		messages.append({"role": "user", "content": stamp(user_text)})
 		await websocket.send_json({"type": "assistant_thinking"})
 
 		max_tool_steps = 3
 		executed_tools = []
-		for _ in range(max_tool_steps):
+		for step in range(max_tool_steps):
 			chunker = SentenceChunker(min_words=3, max_words=20)
 			accumulated_full_text = ""
 			accumulated_tool_calls = []
 			chunk_index = 0
 			is_streaming_to_tts = False
+			is_thinking_block = False
+
+			if not settings.HIDE_BACKGROUND:
+				await websocket.send_json({
+					"type": "debug",
+					"stage": "turn_start",
+					"step": step,
+					"tools_enabled": step == 0
+				})
 
 			try:
-				async for chunk in llm_service.stream_chat(conversation_history, tools=NATIVE_TOOLS, priority=True, fast=True):
+				async for chunk in llm_service.stream_chat(conversation_history, tools=NATIVE_TOOLS if step == 0 else None, priority=True, fast=True):
 					if isinstance(chunk, dict):
 						if "tool_calls" in chunk:
 							accumulated_tool_calls.extend(chunk["tool_calls"])
+						if "reasoning_content" in chunk:
+							if not settings.HIDE_BACKGROUND:
+								await websocket.send_json({
+									"type": "thinking_token",
+									"token": chunk["reasoning_content"]
+								})
 						continue
 
 					token = str(chunk)
 					accumulated_full_text += token
 
-					# Never stream echoed bracketed header or tool_call tags to user or TTS
-					if accumulated_full_text.startswith("["):
-						if "]" in accumulated_full_text:
-							accumulated_full_text = re.sub(r"^\[[^\]]+\]\s*", "", accumulated_full_text)
-						else:
-							continue
+					# Detect thinking tags (<think>, <thought>, <|thought)
+					if "<think" in token or "<thought" in token or "<|thought" in token:
+						is_thinking_block = True
+					if is_thinking_block:
+						if not settings.HIDE_BACKGROUND:
+							await websocket.send_json({
+								"type": "thinking_token",
+								"token": token
+							})
+						if "</think>" in token or "</thought>" in token or "</think>" in accumulated_full_text or "</thought>" in accumulated_full_text:
+							is_thinking_block = False
+							if not settings.HIDE_BACKGROUND:
+								await websocket.send_json({"type": "thinking_done"})
+						continue
 
-					if "<tool_call" in accumulated_full_text:
-						if "</tool_call>" in accumulated_full_text:
+					if adapter.is_tool_call_token(token, accumulated_full_text):
+						if not settings.HIDE_BACKGROUND:
+							await websocket.send_json({
+								"type": "tool_calling_token",
+								"token": token
+							})
+						if adapter.is_tool_call_completed(accumulated_full_text):
 							break
 						continue
 
@@ -111,39 +141,43 @@ async def websocket_call_endpoint(websocket: WebSocket):
 						else:
 							await websocket.send_json({"type": "assistant_sentence", "chunk_index": chunk_index, "text": sentence})
 
-				# 1. Native OpenAI tool calls handling
-				if accumulated_tool_calls:
-					assistant_msg = {"role": "assistant", "content": None, "tool_calls": accumulated_tool_calls}
-					conversation_history.append(assistant_msg)
-					for tc in accumulated_tool_calls:
-						fn = tc.get("function", {})
-						fn_name = fn.get("name", "")
-						raw_args = fn.get("arguments", {})
-						fn_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-						print(f"[WS Call] Native tool call detected: {fn_name} args={fn_args}")
-						await websocket.send_json({"type": "assistant_status", "status": f"Consultando herramienta {fn_name}..."})
-						tool_result = await execute_tool(fn_name, fn_args)
-						executed_tools.append({"tool": fn_name, "args": fn_args})
-						conversation_history.append({
-							"role": "tool",
-							"tool_call_id": tc.get("id", "call_1"),
-							"name": fn_name,
-							"content": tool_result
-						})
-					continue
-
-				# 2. Text fallback tool calls handling
-				tool_name, tool_args, tool_raw = extract_tool_call(accumulated_full_text)
-				if tool_name and tool_raw:
-					print(f"[WS Call] Text fallback tool call detected: {tool_name} args={tool_args}")
-					await websocket.send_json({
-						"type": "assistant_status",
-						"status": f"Consultando herramienta {tool_name}..."
-					})
-					tool_result = await execute_tool(tool_name, tool_args or {})
-					executed_tools.append({"tool": tool_name, "args": tool_args})
-					conversation_history.append({"role": "assistant", "content": tool_raw})
-					conversation_history.append({"role": "user", "content": f"[Resultado de herramienta {tool_name}]:\n{tool_result}"})
+				tool_calls = adapter.extract_tool_calls(
+					native_tool_calls=accumulated_tool_calls,
+					text_content=accumulated_full_text
+				)
+				if tool_calls:
+					if accumulated_tool_calls:
+						conversation_history.append({"role": "assistant", "content": None, "tool_calls": accumulated_tool_calls})
+					for tc in tool_calls:
+						print(f"[WS Call] Tool call detected ({adapter.name}): {tc.name} args={tc.args}")
+						await websocket.send_json({"type": "assistant_status", "status": f"Consultando herramienta {tc.name}..."})
+						if not settings.HIDE_BACKGROUND:
+							await websocket.send_json({
+								"type": "tool_calling",
+								"tool": tc.name,
+								"args": tc.args,
+								"step": step
+							})
+							await websocket.send_json({
+								"type": "tool_executing",
+								"tool": tc.name,
+								"args": tc.args
+							})
+						tool_result = await execute_tool(tc.name, tc.args)
+						executed_tools.append({"tool": tc.name, "args": tc.args})
+						if not settings.HIDE_BACKGROUND:
+							await websocket.send_json({
+								"type": "tool_result",
+								"tool": tc.name,
+								"result": tool_result
+							})
+							await websocket.send_json({
+								"type": "debug",
+								"stage": "tool_result_injected",
+								"tool": tc.name,
+								"next_step": step + 1
+							})
+						conversation_history.extend(adapter.format_tool_response(tc, tool_result))
 					continue
 
 				if is_streaming_to_tts:
@@ -398,21 +432,38 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 	await websocket.accept()
 	current_stream_task: asyncio.Task | None = None
 	async def stream_tokens(messages: list, model: str, tts_mode: str = "rpi5", priority: bool = False, fast: bool = True):
+		adapter = get_adapter(model)
 		max_tool_steps = 3
 		last_usage = None
 		executed_tools = []
-		for _ in range(max_tool_steps):
+		for step in range(max_tool_steps):
 			accumulated = ""
 			accumulated_tool_calls = []
 			chunker = SentenceChunker(min_words=2, max_words=20)
 			chunk_index = 0
 			is_streaming = False
+			is_thinking_block = False
+
+			if not settings.HIDE_BACKGROUND:
+				await websocket.send_json({
+					"type": "debug",
+					"stage": "turn_start",
+					"step": step,
+					"model": model,
+					"tools_enabled": step == 0
+				})
 
 			try:
-				async for chunk in llm_service.stream_chat(messages, model=model, tools=NATIVE_TOOLS, priority=priority, fast=fast):
+				async for chunk in llm_service.stream_chat(messages, model=model, tools=NATIVE_TOOLS if step == 0 else None, priority=priority, fast=fast):
 					if isinstance(chunk, dict):
 						if "tool_calls" in chunk:
 							accumulated_tool_calls.extend(chunk["tool_calls"])
+						if "reasoning_content" in chunk:
+							if not settings.HIDE_BACKGROUND:
+								await websocket.send_json({
+									"type": "thinking_token",
+									"token": chunk["reasoning_content"]
+								})
 						elif chunk.get("type") == "usage":
 							last_usage = chunk
 							await websocket.send_json(chunk)
@@ -421,15 +472,28 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 					token = str(chunk)
 					accumulated += token
 
-					# Never stream echoed bracketed header or tool_call tags to user or TTS
-					if accumulated.startswith("["):
-						if "]" in accumulated:
-							accumulated = re.sub(r"^\[[^\]]+\]\s*", "", accumulated)
-						else:
-							continue
+					# Detect thinking tags (<think>, <thought>, <|thought)
+					if "<think" in token or "<thought" in token or "<|thought" in token:
+						is_thinking_block = True
+					if is_thinking_block:
+						if not settings.HIDE_BACKGROUND:
+							await websocket.send_json({
+								"type": "thinking_token",
+								"token": token
+							})
+						if "</think>" in token or "</thought>" in token or "</think>" in accumulated or "</thought>" in accumulated:
+							is_thinking_block = False
+							if not settings.HIDE_BACKGROUND:
+								await websocket.send_json({"type": "thinking_done"})
+						continue
 
-					if "<tool_call" in accumulated:
-						if "</tool_call>" in accumulated:
+					if adapter.is_tool_call_token(token, accumulated):
+						if not settings.HIDE_BACKGROUND:
+							await websocket.send_json({
+								"type": "tool_calling_token",
+								"token": token
+							})
+						if adapter.is_tool_call_completed(accumulated):
 							break
 						continue
 
@@ -449,40 +513,33 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 						else:
 							await websocket.send_json({"type": "tts_sentence", "chunk_index": chunk_index, "text": sentence})
 
-				# 1. Native OpenAI tool calls handling
-				if accumulated_tool_calls:
-					assistant_msg = {"role": "assistant", "content": None, "tool_calls": accumulated_tool_calls}
-					messages.append(assistant_msg)
-					for tc in accumulated_tool_calls:
-						fn = tc.get("function", {})
-						fn_name = fn.get("name", "")
-						raw_args = fn.get("arguments", {})
-						fn_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-						print(f"[WS Chat] Native tool call detected: {fn_name} args={fn_args}")
-						await websocket.send_json({"type": "tool_calling", "tool": fn_name, "args": fn_args})
-						tool_result = await execute_tool(fn_name, fn_args)
-						executed_tools.append({"tool": fn_name, "args": fn_args})
-						messages.append({
-							"role": "tool",
-							"tool_call_id": tc.get("id", "call_1"),
-							"name": fn_name,
-							"content": tool_result
-						})
-					continue
-
-				# 2. Text fallback tool calls handling
-				tool_name, tool_args, tool_raw = extract_tool_call(accumulated)
-				if tool_name and tool_raw:
-					print(f"[WS Chat] Text fallback tool call detected: {tool_name} args={tool_args}")
-					await websocket.send_json({
-						"type": "tool_calling",
-						"tool": tool_name,
-						"args": tool_args
-					})
-					tool_result = await execute_tool(tool_name, tool_args or {})
-					executed_tools.append({"tool": tool_name, "args": tool_args})
-					messages.append({"role": "assistant", "content": tool_raw})
-					messages.append({"role": "user", "content": f"[Resultado de herramienta {tool_name}]:\n{tool_result}"})
+				tool_calls = adapter.extract_tool_calls(
+					native_tool_calls=accumulated_tool_calls,
+					text_content=accumulated
+				)
+				if tool_calls:
+					if accumulated_tool_calls:
+						messages.append({"role": "assistant", "content": None, "tool_calls": accumulated_tool_calls})
+					for tc in tool_calls:
+						print(f"[WS Chat] Tool call detected ({adapter.name}): {tc.name} args={tc.args}")
+						await websocket.send_json({"type": "tool_calling", "tool": tc.name, "args": tc.args, "step": step})
+						if not settings.HIDE_BACKGROUND:
+							await websocket.send_json({"type": "tool_executing", "tool": tc.name, "args": tc.args})
+						tool_result = await execute_tool(tc.name, tc.args)
+						executed_tools.append({"tool": tc.name, "args": tc.args})
+						if not settings.HIDE_BACKGROUND:
+							await websocket.send_json({
+								"type": "tool_result",
+								"tool": tc.name,
+								"result": tool_result
+							})
+							await websocket.send_json({
+								"type": "debug",
+								"stage": "tool_result_injected",
+								"tool": tc.name,
+								"next_step": step + 1
+							})
+						messages.extend(adapter.format_tool_response(tc, tool_result))
 					continue
 
 				if is_streaming:

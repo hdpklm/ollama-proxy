@@ -219,6 +219,16 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								return [...prev, { role: "assistant", content: accumulatedText }]
 							}
 						})
+					} else if (data.type === "thinking_token") {
+						console.log("[WS Thinking Token]", data.token)
+					} else if (data.type === "tool_calling" || data.type === "tool_calling_token") {
+						console.log("[WS Tool Calling]", data)
+					} else if (data.type === "tool_executing") {
+						console.log("[WS Tool Executing]", data)
+					} else if (data.type === "tool_result") {
+						console.log("[WS Tool Result]", data)
+					} else if (data.type === "debug") {
+						console.log("[WS Debug]", data)
 					} else if (data.type === "audio_chunk" && data.audio_base64) {
 						enqueueAudioChunk(data.audio_base64)
 					} else if (data.type === "tts_sentence" && data.text) {

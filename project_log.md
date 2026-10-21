@@ -851,3 +851,55 @@
 	- `docker-compose.yml`: Se añadió el montaje de volumen `./interface/backend/system_prompt.md:/app/system_prompt.md`.
 	- `system_prompt.md` y `config.py`: Se especificó calcular directamente días relativos (hoy/mañana/ayer) a partir de la fecha dada, prohibir repetir corchetes/encabezados y usar `search_web` directamente sin pedir confirmaciones.
 	- `call_ws.py`: Se formateó `stamp` con nombres de día y mes en español (`[Fecha y hora actual: Martes 20 de octubre de 2026, 23:00 CEST]`) y se implementó un filtro que trunca de inmediato cualquier eco de encabezado entre corchetes antes de enviarlo al usuario o al sintetizador TTS.
+
+### 📝 Registro: [v0.9.3] - Activación explícita de tool_choice='auto' para selección nativa de herramientas
+- **date-time**: 2026-10-20 23:17:00
+- **Problema**:
+	- A pesar de enviar `tools`, el modelo no ejecutaba tool calling (`tools_used: []`) y generaba una respuesta estática directamente.
+- **Causa**:
+	- `llama-cpp-python` requiere explícitamente el parámetro `tool_choice="auto"` junto a `tools` para habilitar el enrutador de funciones y las gramáticas de llamada a herramientas; si `tool_choice` era nulo o no se enviaba, el motor omitía la evaluación de funciones.
+- **Solución**:
+	- `backend/engine.py`: Se configuró por defecto `extra_params["tool_choice"] = job.body.get("tool_choice") or "auto"` siempre que `tools` esté presente.
+	- `interface/backend/services/llm_client.py`: Se inyecta automáticamente `"tool_choice": "auto"` en el payload tanto en `stream_chat` como en `chat`.
+
+### 📝 Registro: [v0.9.3] - Verificación y compatibilidad de tool-calling nativo con Gemma 4 y ejecución en contenedores locales
+- **date-time**: 2026-10-21 01:25:00
+- **Problema**:
+	- Se requería validar en local sobre Docker Desktop si el modelo Gemma 4 en `ollama-proxy` era capaz de ejecutar tool-calling para predecir el tiempo de mañana en Barcelona usando `search_web` sin transferir ni compilar en la Raspberry Pi 5, preservando todos los campos de request (`priority`, `fast`, `max_tokens`, `temperature`, `tools`, `tool_choice`) y response (`priority`, `times_paused`, `kv_cache_ram_mb`, `usage`, métricas TPS y `tools_used`).
+- **Causa**:
+	- Al ejecutar en Windows bajo emulación QEMU ARM64, la inicialización del modelo y la ingesta de prompts largos con esquemas de herramientas y resultados web toma mayor tiempo de CPU, requiriendo ajustar los timeouts por defecto de HTTP (600s). Adicionalmente, Gemma 4 emite tokens de llamada a función nativos (`<|tool_call>call:func{key:<|"|>val<|"|>}<tool_call|>`) que requerían ser parseados por `tool_executor.py`.
+- **Solución**:
+	- Se integró en `services/tool_executor.py` la compatibilidad para el formato de tokens de función nativo de Gemma 4 junto con el formato JSON estándar.
+	- Se optimizó `routes/chat.py` para suministrar las definiciones de herramientas en el primer turno y acotar los snippets devueltos por `web-tools` a 250 caracteres por resultado (máximo 3 resultados) para proteger la ventana de contexto `n_ctx`.
+	- Se verificó que tanto Turn 1 (detección de tool-calling y llamada a `web-tools`) como Turn 2 (síntesis del tiempo en Barcelona con datos reales) responden con código HTTP 200 OK y generan la predicción meteorológica precisa.
+
+### 📝 Registro: [v0.9.4] - Emisión por WebSocket de eventos internos en background (Tool-Calling, Thinking y Debug)
+- **date-time**: 2026-10-21 02:05:00
+- **Problema**:
+	- Se solicitó exponer a través del WebSocket de la interfaz (`/ws/chat` y `/ws/call`) todos los eventos internos que ocurren en background (tokens de tool-calling, tokens de razonamiento/thinking, etapas del ciclo de ejecución y resultados de herramientas) para facilitar el debug en vivo, controlados por una nueva variable en `.env` (`HIDE_BACKGROUND`), con valor por defecto `false` para mostrar todo.
+- **Causa**:
+	- Previamente, para evitar que el motor TTS intentara leer etiquetas de herramientas o corchetes, el WebSocket silenciaba y descartaba el streaming cuando detectaba etiquetas `<tool_call>` o bloques de razonamiento interno, impidiendo que el cliente o desarrollador observara la secuencia interna.
+- **Solución**:
+	- Se añadió la variable `HIDE_BACKGROUND=false` en `.env`, `.env.example`, `interface/.env.example` y `docker-compose.yml`, integrada en `Settings` de `interface/backend/config.py`.
+	- En `interface/backend/routes/call_ws.py` se implementó la emisión de eventos estructurados (`debug`, `thinking_token`, `thinking_done`, `tool_calling_token`, `tool_calling`, `tool_executing`, `tool_result`), protegiendo al mismo tiempo el sintetizador de voz (TTS) para que no vocalice bloques de control.
+	- Se añadió la extracción y propagación de `reasoning_content` en `backend/engine.py`, `backend/responses.py` y `services/llm_client.py`.
+	- Se actualizó el manejador de mensajes de `ChatView.jsx` para registrar todos los eventos de fondo.
+	- Se verificó la recepción de todos los eventos en vivo mediante una conexión WebSocket directa.
+
+### 📝 Registro: [v0.9.5] - Arquitectura de Adaptadores de Modelos (Model Adapter Pattern) y Limpieza de Parches
+- **date-time**: 2026-10-21 02:46:00
+- **Problema**:
+	- Existían múltiples parches heurísticos dispersos en el código: comprobaciones `startswith("[")` interceptando el streaming de TTS, detección ad-hoc de subcadenas `<tool_call>` en mitad del streaming y duplicación completa de 80 líneas de lógica de tool-calling copiada en `/ws/call`, `/ws/chat` y `routes/chat.py`.
+	- Cada familia de modelos (Gemma 4, Qwen, OpenAI estándar) tiene sus propias particularidades sintácticas para tool calls y observaciones de segundo turno, requiriendo un desacoplamiento limpio según su arquitectura.
+- **Causa**:
+	- Crecimiento orgánico de comprobaciones condicionales y band-aids para soportar distintos formatos directamente en los controladores de rutas.
+- **Solución**:
+	- Se implementó el Patrón Adaptador en un único módulo centralizado: `interface/backend/services/adapters/`:
+		- `BaseModelAdapter`: interfaz abstracta para detección de modelo, tokens de herramientas, extracción unificada de `ToolCallItem` y formateo de observaciones de respuesta.
+		- `Gemma4Adapter`: soporte nativo para sintaxis de Gemma 4 (`<|tool_call>`, `<|tool_response>`, etc.).
+		- `QwenAdapter`: soporte para delimitadores `<tool_call>` y `<tool_response>`.
+		- `StandardOpenAIAdapter`: soporte estándar para tool calls estructurados y rol `tool`.
+		- `registry.py`: fábrica `get_adapter(model)` que resuelve dinámicamente el adaptador adecuado.
+	- Se refactorizó `services/tool_executor.py` eliminando expresiones regulares legacy y usando un diccionario de registro `TOOL_REGISTRY`, acotando los snippets web para no desbordar la ventana de contexto `n_ctx=2048`.
+	- Se eliminó la carpeta duplicada `interface/backend/adapters`, dejando un único punto de verdad en `services/adapters/`.
+	- Se unificó el bucle de herramientas en `routes/chat.py` y `routes/call_ws.py` delegando íntegramente en el adaptador.

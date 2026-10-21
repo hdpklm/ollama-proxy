@@ -1,7 +1,7 @@
-# Project Status - Ollama Priority Proxy v0.9.2
+# Project Status - Ollama Priority Proxy v0.9.5
 
-## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Native OpenAI Tool-Calling Engine + Interface Voice/Chat Module (PWA) + Standalone TTS/STT Services + Standalone Web-Tools + Redis Stack Vector RAG
-Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, motor de tool-calling nativo compatible con la API de OpenAI preservando estrictamente todas las características de request (`priority`, `fast`, `max_tokens`, `temperature`, `tools`) y response (`priority`, `times_paused`, `kv_cache_ram_mb`, métricas TPS de prompt y generación), módulo desacoplado de interfaz web PWA instalable en Android/navegador (React + Vite + Tailwind + Service Worker + Manifest), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS), microservicios independientes para Piper TTS, Vosk STT y Web-Tools (Parallel/DDG search, trafilatura reader y PDF extractor), persistencia y búsqueda vectorial RAG en Redis Stack (`/docker/storage/redis`), y scripts desacoplados de compilacion local (`build.bat`) y transferencia directa SSH (`send.bat`).
+## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Native OpenAI Tool-Calling Engine + Model Adapter Architecture + Interface Voice/Chat Module (PWA) + Standalone TTS/STT Services + Standalone Web-Tools + Redis Stack Vector RAG + Real-time WebSocket Debug Stream
+Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, arquitectura de adaptadores de modelo desacoplados (`services/adapters`) para dialéctos de LLM (Gemma 4, Qwen, OpenAI estándar), motor de tool-calling nativo compatible con la API de OpenAI preservando estrictamente todas las características de request (`priority`, `fast`, `max_tokens`, `temperature`, `tools`) y response (`priority`, `times_paused`, `kv_cache_ram_mb`, métricas TPS de prompt y generación), módulo desacoplado de interfaz web PWA instalable en Android/navegador (React + Vite + Tailwind + Service Worker + Manifest), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS) con emisión en tiempo real de eventos internos de depuración (tool-calling, thinking tokens, etapas de ejecución y resultados gobernados por `HIDE_BACKGROUND=false` en `.env`), microservicios independientes para Piper TTS, Vosk STT y Web-Tools (Parallel/DDG search, trafilatura reader y PDF extractor), persistencia y búsqueda vectorial RAG en Redis Stack (`/docker/storage/redis`), y scripts desacoplados de compilacion local (`build.bat`) y transferencia directa SSH (`send.bat`).
 
 ## Mapeo de Modulos y Responsabilidades
 ### `backend/engine.py`
@@ -32,11 +32,12 @@ Proxy HTTP y planificador de tokens por turno estricto con contextos KV independ
 - `main.py`: Inicializa la aplicacion FastAPI del modulo interface, monta rutas REST/WebSocket y sirve los estaticos compilados de `frontend/dist`.
 - `config.py`: Centraliza variables de entorno para endpoints externos de LLM, STT, TTS, Web-Tools y Redis, e inyeccion limpia de `system_prompt.md`.
 - `system_prompt.md`: Prompt conversacional puro sin inyeccion artificial de esquemas en texto.
-- `routes/chat.py`: Endpoints REST para interaccion chat con bucle agéntico de tool-calling nativo de OpenAI (`tool_calls`).
-- `routes/call_ws.py`: Handlers WebSocket para llamadas de voz (/ws/call) y chat (/ws/chat) con detección nativa de `tool_calls` y streaming seguro sin fuga hacia TTS.
+- `routes/chat.py`: Endpoints REST para interaccion chat con bucle agéntico desacoplado mediante `services.adapters`.
+- `routes/call_ws.py`: Handlers WebSocket para llamadas de voz (/ws/call) y chat (/ws/chat) delegando el parseo y formateo de turnos a `services.adapters`, con streaming seguro hacia TTS y emisión de debug.
 - `routes/web_tools.py`: Endpoints REST `/api/tools/search`, `/api/tools/read` y `/api/tools/pdf`.
+- `services/adapters`: Módulo unificado de adaptadores de modelos (`BaseModelAdapter`, `Gemma4Adapter`, `QwenAdapter`, `StandardOpenAIAdapter`, `get_adapter`).
 - `services/tool_definitions.py`: Esquemas estándar de herramientas OpenAI (`search_web`, `read_url`, `read_pdf`).
-- `services/tool_executor.py`: Ejecutor de herramientas locales y web que alimenta la observacion del modelo e indexa en el RAG.
+- `services/tool_executor.py`: Despachador limpio basado en registro `TOOL_REGISTRY` (`_search_web`, `_read_url`, `_read_pdf`) con acotación de contexto para evitar desbordes de `n_ctx`.
 - `services/web_tools_client.py`: Cliente asincrono hacia `web-tools` con autenticación Parallel exclusiva en búsqueda y desacoplada de lectura/PDF.
 - `services/rag_service.py`: Servicio RAG con búsqueda vectorial RediSearch (`FT.CREATE`, `FT.SEARCH` con KNN y cosine distance) y metadatos (`TAG`, `TEXT`, `NUMERIC`) sobre Redis Stack (`/docker/storage/redis`), con fallback local.
 - `services/llm_client.py`: Cliente asincrono HTTP/streaming hacia el proxy LLM con soporte de parametro nativo `tools`.

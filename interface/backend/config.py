@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 	REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
 	PARALLEL_API_KEY: str = os.getenv("PARALLEL_API_KEY", "")
 	SYSTEM_PROMPT_PATH: str = os.getenv("SYSTEM_PROMPT_PATH", os.path.join(os.path.dirname(__file__), "system_prompt.md"))
+	HIDE_BACKGROUND: bool = os.getenv("HIDE_BACKGROUND", "false").strip().lower() in ("true", "1", "yes")
 
 	class Config:
 		env_file = ".env"

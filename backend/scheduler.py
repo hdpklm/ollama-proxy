@@ -2,6 +2,7 @@ import asyncio
 import queue
 import threading
 import time
+import traceback
 from typing import Optional
 
 from backend.job import DELTA, DONE, ERROR, Job
@@ -127,6 +128,8 @@ class Scheduler:
 						self.current_low.t_start = time.time()
 						self.stream_low = self.engine.create_stream(self.current_low)
 					except Exception as err:
+						print(f"[Scheduler Error create_stream low]: {err}", flush=True)
+						traceback.print_exc()
 						if self.current_low and self.loop:
 							self.loop.call_soon_threadsafe(self.current_low.out.put_nowait, (ERROR, str(err)))
 						self.current_low = None
@@ -180,6 +183,8 @@ class Scheduler:
 					self.current_low = None
 					self.stream_low = None
 				except Exception as err:
+					print(f"[Scheduler Error stream next low]: {err}", flush=True)
+					traceback.print_exc()
 					if self.loop and self.current_low:
 						self.loop.call_soon_threadsafe(self.current_low.out.put_nowait, (ERROR, str(err)))
 					self.current_low = None
