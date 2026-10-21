@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react"
-import { Send, Mic, Square, Play, Pause, Loader2, Bot, User, Volume2, VolumeX } from "lucide-react"
+import { Send, Mic, Square, Play, Pause, Loader2, Bot, User, Volume2, VolumeX, Activity, Wrench, ChevronDown, ChevronUp, Cpu, Terminal } from "lucide-react"
 
 export default function ChatView({ settings = { useBrowserTTS: false, useBrowserSTT: false } }) {
 	const [messages, setMessages] = useState([
@@ -14,6 +14,14 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	const [playingIndex, setPlayingIndex] = useState(null)
 	const [audioLoadingIndex, setAudioLoadingIndex] = useState(null)
 	const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false)
+	const [openMetricsIndices, setOpenMetricsIndices] = useState({})
+
+	const toggleMetrics = (index) => {
+		setOpenMetricsIndices((prev) => ({
+			...prev,
+			[index]: !prev[index]
+		}))
+	}
 
 	const messagesEndRef = useRef(null)
 	const speechRecRef = useRef(null)
@@ -149,12 +157,29 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 			if (!res.ok) throw new Error("Failed to contact LLM")
 			const data = await res.json()
 			const assistantContent = data.message?.content || data.response || "No response"
+			const toolsUsed = data.tools_used || []
+			const usageData = data.usage || (data.prompt_tokens !== undefined ? {
+				prompt_tokens: data.prompt_tokens,
+				completion_tokens: data.completion_tokens,
+				total_tokens: (data.prompt_tokens || 0) + (data.completion_tokens || 0),
+				prompt_tokens_per_second: data.prompt_token_s || data.prompt_tokens_per_second,
+				tokens_per_second: data.generate_token_s || data.tokens_per_second
+			} : null)
 			setMessages((prev) => {
 				const last = prev[prev.length - 1]
-				if (last && last.role === "assistant") {
-					return [...prev.slice(0, -1), { role: "assistant", content: assistantContent }]
+				const newMsg = {
+					role: "assistant",
+					content: assistantContent,
+					tools_used: toolsUsed,
+					usage: usageData,
+					priority: data.priority,
+					times_paused: data.times_paused,
+					kv_cache_ram_mb: data.kv_cache_ram_mb
 				}
-				return [...prev, { role: "assistant", content: assistantContent }]
+				if (last && last.role === "assistant") {
+					return [...prev.slice(0, -1), newMsg]
+				}
+				return [...prev, newMsg]
 			})
 		} catch (err) {
 			console.error("Chat error:", err)
@@ -205,6 +230,9 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 			}
 
 			let accumulatedText = ""
+			let currentTools = []
+			let currentUsage = null
+			let currentMeta = {}
 
 			ws.onmessage = (event) => {
 				try {
@@ -213,20 +241,63 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 						accumulatedText += data.token
 						setMessages((prev) => {
 							const last = prev[prev.length - 1]
+							const newMsg = {
+								role: "assistant",
+								content: accumulatedText,
+								tools_used: currentTools,
+								usage: currentUsage,
+								...currentMeta
+							}
 							if (last && last.role === "assistant") {
-								return [...prev.slice(0, -1), { ...last, content: accumulatedText }]
+								return [...prev.slice(0, -1), newMsg]
 							} else {
-								return [...prev, { role: "assistant", content: accumulatedText }]
+								return [...prev, newMsg]
 							}
 						})
 					} else if (data.type === "thinking_token") {
 						console.log("[WS Thinking Token]", data.token)
 					} else if (data.type === "tool_calling" || data.type === "tool_calling_token") {
 						console.log("[WS Tool Calling]", data)
+						if (data.tool) {
+							const exists = currentTools.some(
+								(t) => t.tool === data.tool && JSON.stringify(t.args) === JSON.stringify(data.args)
+							)
+							if (!exists) {
+								currentTools = [...currentTools, { tool: data.tool, args: data.args, step: data.step }]
+								setMessages((prev) => {
+									const last = prev[prev.length - 1]
+									if (last && last.role === "assistant") {
+										return [...prev.slice(0, -1), { ...last, tools_used: currentTools }]
+									}
+									return prev
+								})
+							}
+						}
 					} else if (data.type === "tool_executing") {
 						console.log("[WS Tool Executing]", data)
 					} else if (data.type === "tool_result") {
 						console.log("[WS Tool Result]", data)
+					} else if (data.type === "usage") {
+						currentUsage = data.usage || currentUsage
+						currentMeta = {
+							priority: data.priority ?? currentMeta.priority,
+							times_paused: data.times_paused ?? currentMeta.times_paused,
+							kv_cache_ram_mb: data.kv_cache_ram_mb ?? currentMeta.kv_cache_ram_mb
+						}
+						setMessages((prev) => {
+							const last = prev[prev.length - 1]
+							if (last && last.role === "assistant") {
+								return [
+									...prev.slice(0, -1),
+									{
+										...last,
+										usage: currentUsage,
+										...currentMeta
+									}
+								]
+							}
+							return prev
+						})
 					} else if (data.type === "debug") {
 						console.log("[WS Debug]", data)
 					} else if (data.type === "audio_chunk" && data.audio_base64) {
@@ -234,6 +305,30 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 					} else if (data.type === "tts_sentence" && data.text) {
 						enqueueBrowserTts(data.text)
 					} else if (data.type === "done") {
+						const finalTools = (data.tools_used && data.tools_used.length > 0) ? data.tools_used : currentTools
+						const finalUsage = data.usage || currentUsage
+						const finalPriority = data.priority ?? currentMeta.priority
+						const finalTimesPaused = data.times_paused ?? currentMeta.times_paused
+						const finalKvCache = data.kv_cache_ram_mb ?? currentMeta.kv_cache_ram_mb
+
+						setMessages((prev) => {
+							const last = prev[prev.length - 1]
+							if (last && last.role === "assistant") {
+								return [
+									...prev.slice(0, -1),
+									{
+										...last,
+										content: accumulatedText || last.content,
+										tools_used: finalTools,
+										usage: finalUsage,
+										priority: finalPriority,
+										times_paused: finalTimesPaused,
+										kv_cache_ram_mb: finalKvCache
+									}
+								]
+							}
+							return prev
+						})
 						setIsLoading(false)
 						try { ws.close() } catch (e) {}
 						streamWsRef.current = null
@@ -530,38 +625,164 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 							</p>
 
 							{msg.role === "assistant" && (
-								<div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center gap-2">
-									{isAssistantSpeaking && index === messages.length - 1 ? (
+								<div className="mt-2.5 pt-2 border-t border-slate-800/80 flex flex-col gap-2">
+									<div className="flex items-center gap-2 flex-wrap">
+										{isAssistantSpeaking && index === messages.length - 1 ? (
+											<button
+												onClick={stopStreamingAudio}
+												className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-rose-600/20 text-rose-400 border border-rose-500/40 hover:bg-rose-600/30 transition-colors animate-pulse"
+												title="Silenciar voz del asistente"
+											>
+												<VolumeX className="w-3.5 h-3.5" />
+												<span>Silenciar</span>
+											</button>
+										) : (!isLoading || index !== messages.length - 1) && (
+											<button
+												onClick={() => handlePlayTTS(msg.content, index)}
+												disabled={audioLoadingIndex === index}
+												className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-colors"
+												title="Play response audio"
+											>
+												{audioLoadingIndex === index ? (
+													<Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+												) : playingIndex === index ? (
+													<Pause className="w-3.5 h-3.5 text-sky-400" />
+												) : (
+													<Volume2 className="w-3.5 h-3.5" />
+												)}
+												<span>
+													{audioLoadingIndex === index
+														? "Generating..."
+														: playingIndex === index
+														? "Pause"
+														: "Listen"}
+												</span>
+											</button>
+										)}
+
 										<button
-											onClick={stopStreamingAudio}
-											className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-rose-600/20 text-rose-400 border border-rose-500/40 hover:bg-rose-600/30 transition-colors animate-pulse"
-											title="Silenciar voz del asistente"
+											onClick={() => toggleMetrics(index)}
+											className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors border ${
+												openMetricsIndices[index]
+													? "bg-sky-500/20 text-sky-300 border-sky-500/40 shadow-sm"
+													: "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/60"
+											}`}
+											title="Ver herramientas y velocidad de generación"
 										>
-											<VolumeX className="w-3.5 h-3.5" />
-											<span>Silenciar</span>
-										</button>
-									) : (!isLoading || index !== messages.length - 1) && (
-										<button
-											onClick={() => handlePlayTTS(msg.content, index)}
-											disabled={audioLoadingIndex === index}
-											className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-colors"
-											title="Play response audio"
-										>
-											{audioLoadingIndex === index ? (
-												<Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
-											) : playingIndex === index ? (
-												<Pause className="w-3.5 h-3.5 text-sky-400" />
-											) : (
-												<Volume2 className="w-3.5 h-3.5" />
+											<Activity className="w-3.5 h-3.5 text-sky-400" />
+											<span>Métricas</span>
+											{msg.tools_used && msg.tools_used.length > 0 && (
+												<span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+													<Wrench className="w-2.5 h-2.5 mr-1" />
+													{msg.tools_used.length}
+												</span>
 											)}
-											<span>
-												{audioLoadingIndex === index
-													? "Generating..."
-													: playingIndex === index
-													? "Pause"
-													: "Listen"}
-											</span>
+											{openMetricsIndices[index] ? (
+												<ChevronUp className="w-3 h-3 text-slate-400" />
+											) : (
+												<ChevronDown className="w-3 h-3 text-slate-400" />
+											)}
 										</button>
+									</div>
+
+									{openMetricsIndices[index] && (
+										<div className="w-full bg-slate-950/80 border border-slate-800/90 rounded-xl p-3 text-xs text-slate-300 space-y-3 shadow-inner">
+											<div>
+												<div className="flex items-center gap-1.5 font-semibold text-slate-200 mb-2">
+													<Cpu className="w-3.5 h-3.5 text-sky-400" />
+													<span>Velocidad y Tokens de Generación</span>
+												</div>
+												{msg.usage ? (
+													<div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+														<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex flex-col">
+															<span className="text-[10px] text-slate-400 uppercase tracking-wide">Prompt</span>
+															<span className="text-sm font-semibold text-slate-100">
+																{msg.usage.prompt_tokens ?? "-"} <span className="text-[10px] font-normal text-slate-400">tokens</span>
+															</span>
+															<span className="text-[11px] text-sky-400 font-mono mt-0.5">
+																{(msg.usage.prompt_tokens_per_second || msg.usage.prompt_token_s)
+																	? `${msg.usage.prompt_tokens_per_second || msg.usage.prompt_token_s} t/s`
+																	: "-"}
+															</span>
+														</div>
+
+														<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex flex-col">
+															<span className="text-[10px] text-slate-400 uppercase tracking-wide">Generación</span>
+															<span className="text-sm font-semibold text-slate-100">
+																{msg.usage.completion_tokens ?? "-"} <span className="text-[10px] font-normal text-slate-400">tokens</span>
+															</span>
+															<span className="text-[11px] text-emerald-400 font-mono mt-0.5">
+																{(msg.usage.tokens_per_second || msg.usage.generate_token_s)
+																	? `${msg.usage.tokens_per_second || msg.usage.generate_token_s} t/s`
+																	: "-"}
+															</span>
+														</div>
+
+														<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex flex-col col-span-2 sm:col-span-1">
+															<span className="text-[10px] text-slate-400 uppercase tracking-wide">Total</span>
+															<span className="text-sm font-semibold text-slate-100">
+																{msg.usage.total_tokens ?? ((msg.usage.prompt_tokens || 0) + (msg.usage.completion_tokens || 0))} <span className="text-[10px] font-normal text-slate-400">tokens</span>
+															</span>
+															{msg.times_paused !== undefined && msg.times_paused > 0 ? (
+																<span className="text-[10px] text-amber-400 mt-0.5">
+																	{msg.times_paused} {msg.times_paused === 1 ? "pausa" : "pausas"}
+																</span>
+															) : (
+																<span className="text-[10px] text-slate-400 mt-0.5">
+																	Prioridad: {msg.priority ? "Alta" : "Baja"}
+																</span>
+															)}
+														</div>
+													</div>
+												) : (
+													<div className="text-[11px] text-slate-500 italic bg-slate-900/40 border border-slate-800/40 rounded-lg p-2">
+														Sin telemetría de rendimiento registrada para este mensaje.
+													</div>
+												)}
+											</div>
+
+											<div className="pt-2 border-t border-slate-800/60">
+												<div className="flex items-center gap-1.5 font-semibold text-slate-200 mb-1.5">
+													<Wrench className="w-3.5 h-3.5 text-amber-400" />
+													<span>Herramientas Utilizadas</span>
+												</div>
+												{msg.tools_used && msg.tools_used.length > 0 ? (
+													<div className="space-y-1.5 mt-1">
+														{msg.tools_used.map((t, tIdx) => (
+															<div
+																key={tIdx}
+																className="bg-slate-900/90 border border-slate-800 rounded-lg p-2 text-[11px] font-mono text-slate-300"
+															>
+																<div className="flex items-center justify-between text-sky-400 font-semibold mb-1">
+																	<span className="flex items-center gap-1">
+																		<Terminal className="w-3 h-3 text-amber-400" />
+																		{t.tool || "herramienta"}
+																	</span>
+																	{t.step !== undefined && (
+																		<span className="text-[10px] text-slate-500 font-normal">
+																			Paso {t.step + 1}
+																		</span>
+																	)}
+																</div>
+																{t.args && Object.keys(t.args).length > 0 ? (
+																	<div className="bg-slate-950/80 rounded p-1.5 overflow-x-auto text-slate-400 text-[10px] border border-slate-800/50">
+																		{typeof t.args === "string"
+																			? t.args
+																			: JSON.stringify(t.args, null, 2)}
+																	</div>
+																) : (
+																	<span className="text-slate-500 text-[10px]">Sin argumentos</span>
+																)}
+															</div>
+														))}
+													</div>
+												) : (
+													<div className="text-[11px] text-slate-400 italic bg-slate-900/40 border border-slate-800/40 rounded-lg p-2">
+														No se utilizaron herramientas externas en este turno.
+													</div>
+												)}
+											</div>
+										</div>
 									)}
 								</div>
 							)}

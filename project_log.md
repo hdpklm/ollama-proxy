@@ -938,3 +938,15 @@
 - **Solución**:
 	- Se compilaron y cargaron en Docker local las 5 imágenes con destino `linux/arm64`: `ollama-proxy:RPi5`, `interface:RPi5`, `piper-tts:RPi5`, `vosk-stt:RPi5` y `web-tools:RPi5`.
 	- Se creó el script de acceso directo `build-rpi5.bat` y se integró `web-tools` en `build-n-send.bat`.
+
+### 📝 Registro: [v0.9.7] - Boton de telemetria y visor de herramientas en respuestas del chat
+- **date-time**: 2026-10-21 13:55:00
+- **Problema**:
+	- En la vista de chat (`ChatView.jsx`), los mensajes de respuesta del asistente no disponían de un botón interactivo para consultar las herramientas ejecutadas ni las métricas de rendimiento y velocidad de generación (tokens de prompt, velocidad TPS de prompt, tokens generados y velocidad TPS de generación).
+- **Causa**:
+	- El cliente WebSocket y el fallback REST recibían los eventos de `tool_calling`, `usage` y `done`, pero no persistían `tools_used` ni `usage` en el estado de cada mensaje del asistente ni contaban con un componente de interfaz para desplegarlos.
+- **Solución**:
+	- Modificado `interface/frontend/src/components/ChatView.jsx` agregando la captura y persistencia de `tools_used` y `usage` en cada mensaje del asistente (tanto vía `/ws/chat` como en `fallbackFetchChat`).
+	- Añadido botón interactivo con icono `Activity` (y contador de tools con `Wrench`) en el footer de cada respuesta del asistente.
+	- Creado panel desplegable con diseño moderno que detalla: conteo y velocidad TPS de evaluación de prompt, conteo y velocidad TPS de tokens generados, total de tokens, métricas del scheduler (prioridad y pausas), y lista desglosada de herramientas ejecutadas con sus argumentos.
+	- Actualizado `project_status.md` a la versión `v0.9.7`.
