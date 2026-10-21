@@ -928,3 +928,13 @@
 	- Se eliminaron los contenedores antiguos emulados y el contenedor conflictivo `redis`.
 	- Se compilaron y ejecutaron todas las imágenes con arquitectura nativa `linux/amd64` (`ollama-proxy:linux`, `interface:linux`, `web-tools:linux`, `piper-tts:linux`, `vosk-stt:linux`).
 	- La velocidad de generación aumentó de 0.42 t/s a 15.29 t/s (83.2 prompt t/s), completando el flujo completo de tool calling en 21.5s.
+
+### 📝 Registro: [v0.9.6] - Compilacion de Imagenes para Raspberry Pi 5 con Tag RPi5
+- **date-time**: 2026-10-21 03:05:00
+- **Problema**:
+	- Se requerían las imágenes del stack compiladas específicamente para Raspberry Pi 5 (`linux/arm64`) bajo el tag `:RPi5`.
+- **Causa**:
+	- Separación de entornos de compilación para evitar conflictos entre la versión nativa de desarrollo en PC (`:linux`) y la versión de producción en ARM64 (`:RPi5`).
+- **Solución**:
+	- Se compilaron y cargaron en Docker local las 5 imágenes con destino `linux/arm64`: `ollama-proxy:RPi5`, `interface:RPi5`, `piper-tts:RPi5`, `vosk-stt:RPi5` y `web-tools:RPi5`.
+	- Se creó el script de acceso directo `build-rpi5.bat` y se integró `web-tools` en `build-n-send.bat`.

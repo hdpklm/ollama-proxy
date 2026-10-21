@@ -24,18 +24,20 @@ if not "%TARGET_SVC%"=="" goto process_choice
 
 echo.
 echo Selecciona que servicio deseas compilar y transferir:
-echo   [1] Todos los servicios (proxy + interface + piper + vosk)
+echo   [1] Todos los servicios (proxy + interface + piper + vosk + web-tools)
 echo   [2] Solo interface (Web + FastAPI)
 echo   [3] Solo piper-tts (TTS)
 echo   [4] Solo vosk-stt (STT)
 echo   [5] Solo ollama-proxy (Core LLM Proxy)
+echo   [6] Solo web-tools (Search, Reader & PDF)
 echo.
-set /p OPCION="Opcion [1-5]: "
+set /p OPCION="Opcion [1-6]: "
 
 if "%OPCION%"=="2" set TARGET_SVC=interface& goto process_choice
 if "%OPCION%"=="3" set TARGET_SVC=piper-tts& goto process_choice
 if "%OPCION%"=="4" set TARGET_SVC=vosk-stt& goto process_choice
 if "%OPCION%"=="5" set TARGET_SVC=ollama-proxy& goto process_choice
+if "%OPCION%"=="6" set TARGET_SVC=web-tools& goto process_choice
 set TARGET_SVC=all
 
 :process_choice
@@ -44,6 +46,7 @@ if "%TARGET_SVC%"=="ollama-proxy" goto build_proxy
 if "%TARGET_SVC%"=="interface" goto build_interface
 if "%TARGET_SVC%"=="piper-tts" goto build_piper
 if "%TARGET_SVC%"=="vosk-stt" goto build_vosk
+if "%TARGET_SVC%"=="web-tools" goto build_web_tools
 
 :build_all
 call :process_image "ollama-proxy:RPi5" "."
@@ -53,6 +56,8 @@ if errorlevel 1 exit /b 1
 call :process_image "piper-tts:RPi5" "./dockers/piper"
 if errorlevel 1 exit /b 1
 call :process_image "vosk-stt:RPi5" "./dockers/vosk"
+if errorlevel 1 exit /b 1
+call :process_image "web-tools:RPi5" "./dockers/web-tools"
 if errorlevel 1 exit /b 1
 goto finished
 
@@ -70,6 +75,10 @@ goto finished
 
 :build_vosk
 call :process_image "vosk-stt:RPi5" "./dockers/vosk"
+goto finished
+
+:build_web_tools
+call :process_image "web-tools:RPi5" "./dockers/web-tools"
 goto finished
 
 :process_image
