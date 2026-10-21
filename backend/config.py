@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import subprocess
 
@@ -8,6 +9,7 @@ N_CTX = int(os.getenv("N_CTX", "4096"))
 N_CTX_HIGH = int(os.getenv("N_CTX_HIGH", "2048"))
 N_THREADS = int(os.getenv("N_THREADS", "4"))
 FLASH_ATTN = os.getenv("FLASH_ATTN", "true").strip().lower() in ("true", "1", "yes")
+PROMPT_CACHE_DIR = os.getenv("PROMPT_CACHE_DIR", "./cache/prompt_states")
 
 
 def resolve_model_path(model_name: str | None = None) -> str:

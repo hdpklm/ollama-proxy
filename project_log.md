@@ -964,3 +964,16 @@
 	- Actualizado `interface/backend/system_prompt.md` y `interface/backend/config.py` orientando al modelo orquestador a utilizar estas delegaciones cuando la complejidad lo requiera.
 	- Adaptado `interface/frontend/src/components/ChatView.jsx` para distinguir visualmente las ejecuciones de sub-agentes con badge e icono de bot en el visor de telemetría y métricas.
 	- Actualizado `project_status.md` a la versión `v0.9.8`.
+
+### 📝 Registro: [v0.9.9] - Sistema de Cache Binario en RAM y Disco para System Prompts de Agentes
+- **date-time**: 2026-10-21 16:38:00
+- **Problema**:
+	- Al invocar al agente principal o a sub-agentes en cada consulta, el motor LLM debía re-calcular y evaluar todos los tokens de entrada de la cabecera (system prompt), incrementando la latencia de primer token (TTFT) de forma redundante.
+- **Causa**:
+	- No existía un mecanismo de persistencia binaria ni precarga en memoria RAM del estado KV-Cache correspondiente a los system prompts de los agentes.
+- **Solución**:
+	- Creado `backend/prompt_cache.py` con `PromptCacheManager`, el cual serializa el estado KV (`.bin`) indexado por hash SHA256 del contenido del system prompt.
+	- Implementada invalidación automática: al cambiar el hash de la cabecera de un agente, se elimina el binario antiguo obsoleto del disco y se genera y persiste el nuevo.
+	- Añadida precarga automática a memoria RAM al iniciar el contenedor (`load_all_to_ram` y `warmup_defaults`) para que todos los estados conocidos queden residentes en memoria sin latencia de disco.
+	- Integrado en `backend/engine.py` (`create_stream` y `count_prompt_tokens`) restaurando directamente el estado en el contexto (`llm.load_state`), permitiendo omitir la evaluación de la cabecera y calcular únicamente desde los mensajes del usuario en adelante.
+	- Actualizado `project_status.md` a la versión `v0.9.9`.

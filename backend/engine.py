@@ -1,9 +1,11 @@
+from __future__ import annotations
 import os
 from typing import Tuple
 from llama_cpp import Llama
 
 from backend.config import FLASH_ATTN, N_CTX, N_CTX_HIGH, N_THREADS, resolve_model_path
 from backend.job import CHAT, Job
+from backend.prompt_cache import PromptCacheManager
 
 
 def calcular_kv_ram_mb(n_tokens: int) -> float:
@@ -32,15 +34,29 @@ class LlamaEngine:
 			flash_attn=FLASH_ATTN,
 			verbose=False,
 		)
+		# Initialize binary prompt cache and pre-warm known agents into RAM
+		self.prompt_cache = PromptCacheManager()
+		self.prompt_cache.warmup_defaults(self.llm_low)
 
 	def count_prompt_tokens(self, job: Job) -> int:
 		try:
 			llm = self.llm_high if job.priority else self.llm_low
 			if job.kind == CHAT:
-				prompt_text = " ".join(m.get("content", "") for m in job.body.get("messages", []))
+				messages = job.body.get("messages", [])
+				sys_msg = next((m for m in messages if m.get("role") == "system"), None)
+				cached_sys_tokens = 0
+				if sys_msg and sys_msg.get("content"):
+					prompt_hash = self.prompt_cache.compute_hash(sys_msg["content"])
+					cached_item = self.prompt_cache.ram_cache.get(prompt_hash)
+					if cached_item and "tokens" in cached_item:
+						cached_sys_tokens = len(cached_item["tokens"])
+
+				user_text = " ".join(m.get("content", "") for m in messages if m.get("role") != "system")
+				user_tokens = len(llm.tokenize(user_text.encode("utf-8"))) if user_text else 0
+				return user_tokens if cached_sys_tokens > 0 else (user_tokens + cached_sys_tokens)
 			else:
 				prompt_text = str(job.body.get("prompt", ""))
-			return len(llm.tokenize(prompt_text.encode("utf-8")))
+				return len(llm.tokenize(prompt_text.encode("utf-8")))
 		except Exception:
 			return 0
 
@@ -63,6 +79,10 @@ class LlamaEngine:
 				extra_params["top_p"] = float(job.body["top_p"])
 
 		if messages:
+			sys_msg = next((m for m in messages if m.get("role") == "system"), None)
+			if sys_msg and sys_msg.get("content"):
+				self.prompt_cache.apply_cache_if_available(llm, sys_msg["content"])
+
 			if "tools" in job.body and job.body["tools"]:
 				extra_params["tools"] = job.body["tools"]
 				extra_params["tool_choice"] = job.body.get("tool_choice") or "auto"
