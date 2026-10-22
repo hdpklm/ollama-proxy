@@ -15,6 +15,8 @@ def calcular_kv_ram_mb(n_tokens: int) -> float:
 
 class LlamaEngine:
 	def __init__(self, model_path: str | None = None):
+		import time
+		t_load_start = time.time()
 		resolved = model_path or resolve_model_path()
 		if not resolved or not os.path.exists(resolved):
 			raise FileNotFoundError(f"GGUF model not found at path: {resolved}")
@@ -34,6 +36,8 @@ class LlamaEngine:
 			flash_attn=FLASH_ATTN,
 			verbose=False,
 		)
+		self.load_duration = round(time.time() - t_load_start, 3)
+		self.last_restore_duration = 0.0
 		# Initialize binary prompt cache and pre-warm known agents into RAM
 		self.prompt_cache = PromptCacheManager()
 		self.prompt_cache.warmup_defaults(self.llm_low)
@@ -134,11 +138,14 @@ class LlamaEngine:
 		return False
 
 	def restore_context_snapshot(self, snapshot_id: str = "caller", priority: bool = False) -> bool:
+		import time
 		llm = self.llm_high if priority else self.llm_low
 		state = self.prompt_cache.pop_snapshot(snapshot_id)
 		if state and hasattr(llm, "load_state"):
 			try:
+				t0 = time.time()
 				llm.load_state(state)
+				self.last_restore_duration = round(time.time() - t0, 4)
 				return True
 			except Exception as e:
 				print(f"[Engine] Failed to restore context snapshot '{snapshot_id}': {e}")

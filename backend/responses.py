@@ -76,7 +76,9 @@ async def stream_body(job):
 				"choices": [],
 				"usage": {
 					"prompt_tokens": job.prompt_tokens,
+					"prompt_eval_seconds": round(job.prompt_eval_seconds, 3),
 					"completion_tokens": job.generated,
+					"generation_seconds": round(job.generation_seconds, 3),
 					"total_tokens": job.prompt_tokens + job.generated,
 					"prompt_token_s": job.prompt_tps,
 					"generate_token_s": job.generation_tps,
@@ -123,7 +125,9 @@ async def collect_body(job):
 	prefix = "chatcmpl" if job.kind == CHAT else "cmpl"
 	usage = {
 		"prompt_tokens": job.prompt_tokens,
+		"prompt_eval_seconds": round(job.prompt_eval_seconds, 3),
 		"completion_tokens": job.generated,
+		"generation_seconds": round(job.generation_seconds, 3),
 		"total_tokens": job.prompt_tokens + job.generated,
 		"prompt_token_s": job.prompt_tps,
 		"generate_token_s": job.generation_tps,

@@ -60,7 +60,7 @@ TOOL_REGISTRY: Dict[str, Callable[[Dict[str, Any]], Awaitable[str]]] = {
 
 from services.sub_agents import SUB_AGENTS
 
-async def _delegate_sub_agent(sub_agent_key: str, args: Dict[str, Any]) -> str:
+async def _delegate_sub_agent(sub_agent_key: str, args: Dict[str, Any], on_metric: Any = None) -> str:
 	agent = SUB_AGENTS.get(sub_agent_key)
 	if not agent:
 		return f"Error: Sub-agente '{sub_agent_key}' no encontrado."
@@ -68,14 +68,14 @@ async def _delegate_sub_agent(sub_agent_key: str, args: Dict[str, Any]) -> str:
 	context = str(args.get("context", "")).strip()
 	if not task:
 		return f"Error: Tarea vacía para sub-agente '{sub_agent_key}'."
-	return await agent.run(task=task, context=context)
+	return await agent.run(task=task, context=context, on_metric=on_metric)
 
 for _agent_key in SUB_AGENTS.keys():
 	TOOL_REGISTRY[f"delegate_to_{_agent_key}"] = (
-		lambda k: (lambda args: _delegate_sub_agent(k, args))
+		lambda k: (lambda args, on_m=None: _delegate_sub_agent(k, args, on_metric=on_m))
 	)(_agent_key)
 
-async def execute_tool(name: str, arguments: Dict[str, Any] | str | None) -> str:
+async def execute_tool(name: str, arguments: Dict[str, Any] | str | None, on_metric: Any = None) -> str:
 	if isinstance(arguments, str):
 		try:
 			arguments = json.loads(arguments)
@@ -88,9 +88,11 @@ async def execute_tool(name: str, arguments: Dict[str, Any] | str | None) -> str
 	if not handler and name.startswith("delegate_to_"):
 		sub_agent_key = name[len("delegate_to_"):]
 		if sub_agent_key in SUB_AGENTS:
-			return await _delegate_sub_agent(sub_agent_key, arguments)
+			return await _delegate_sub_agent(sub_agent_key, arguments, on_metric=on_metric)
 
 	if not handler:
 		return f"Error: Herramienta desconocida '{name}'."
 
+	if name.startswith("delegate_to_"):
+		return await handler(arguments, on_m=on_metric)
 	return await handler(arguments)

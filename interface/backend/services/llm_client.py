@@ -155,6 +155,44 @@ class LLMClient:
 				return data
 			return data
 
+	async def get_model_info(self, model: str | None = None) -> dict:
+		url = f"{self.base_url}/v1/models"
+		headers = self._get_headers()
+		try:
+			async with httpx.AsyncClient(timeout=5.0) as client:
+				resp = await client.get(url, headers=headers)
+				if resp.status_code == 200:
+					data = resp.json().get("data", [])
+					if data:
+						target = next((m for m in data if m.get("id") == model), data[0])
+						return {
+							"model": target.get("id", model or "default"),
+							"in_memory": bool(target.get("in_memory", True)),
+							"load_time_seconds": float(target.get("load_time_seconds", 0.0))
+						}
+		except Exception as e:
+			print(f"[LLMClient] Warning: Failed to query model info: {e}")
+		return {
+			"model": model or settings.LLM_MODEL,
+			"in_memory": True,
+			"load_time_seconds": 0.0
+		}
+
+	async def count_tokens(self, text: str) -> int:
+		if not text:
+			return 0
+		url = f"{self.base_url}/v1/tokenize"
+		headers = self._get_headers()
+		try:
+			async with httpx.AsyncClient(timeout=5.0) as client:
+				resp = await client.post(url, json={"text": text}, headers=headers)
+				if resp.status_code == 200:
+					return int(resp.json().get("count", len(text) // 4))
+		except Exception:
+			pass
+		# Fallback approximation for Spanish / code text (approx 3.8 chars per token)
+		return max(1, len(text) // 4)
+
 	async def save_context_snapshot(self, snapshot_id: str = "caller_agent", priority: bool = False) -> bool:
 		url = f"{self.base_url}/v1/context/snapshot/save"
 		payload = {"snapshot_id": snapshot_id, "priority": priority}
@@ -167,14 +205,20 @@ class LLMClient:
 			print(f"[LLMClient] Warning: Failed to save context snapshot '{snapshot_id}': {e}")
 			return False
 
-	async def restore_context_snapshot(self, snapshot_id: str = "caller_agent", priority: bool = False) -> bool:
+	async def restore_context_snapshot(self, snapshot_id: str = "caller_agent", priority: bool = False) -> dict:
 		url = f"{self.base_url}/v1/context/snapshot/restore"
 		payload = {"snapshot_id": snapshot_id, "priority": priority}
 		headers = self._get_headers()
 		try:
 			async with httpx.AsyncClient(timeout=10.0) as client:
 				resp = await client.post(url, json=payload, headers=headers)
-				return resp.status_code == 200 and resp.json().get("status") == "ok"
+				if resp.status_code == 200:
+					data = resp.json()
+					return {
+						"success": data.get("status") == "ok",
+						"restore_time_seconds": float(data.get("restore_time_seconds", 0.0)),
+						"kv_cache_ram_mb": float(data.get("kv_cache_ram_mb", 0.0))
+					}
 		except Exception as e:
 			print(f"[LLMClient] Warning: Failed to restore context snapshot '{snapshot_id}': {e}")
-			return False
+		return {"success": False, "restore_time_seconds": 0.0, "kv_cache_ram_mb": 0.0}

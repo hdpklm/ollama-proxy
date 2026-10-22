@@ -66,6 +66,7 @@ async def completions(request: Request):
 async def list_models(request: Request):
 	engine = getattr(request.app.state, "engine", None)
 	model_name = os.path.basename(engine.model_path) if engine else "default"
+	load_duration = getattr(engine, "load_duration", 0.0) if engine else 0.0
 	return {
 		"object": "list",
 		"data": [
@@ -74,9 +75,26 @@ async def list_models(request: Request):
 				"object": "model",
 				"created": int(time.time()),
 				"owned_by": "llama-cpp-python",
+				"in_memory": True if engine is not None else False,
+				"load_time_seconds": load_duration,
 			}
 		],
 	}
+
+
+@router.post("/tokenize")
+async def tokenize_endpoint(request: Request):
+	engine = getattr(request.app.state, "engine", None)
+	if not engine:
+		raise HTTPException(status_code=500, detail="Engine not initialized")
+	try:
+		body = await request.json()
+	except Exception:
+		body = {}
+	text = str(body.get("text", ""))
+	llm = engine.llm_low
+	tokens = llm.tokenize(text.encode("utf-8")) if hasattr(llm, "tokenize") else []
+	return {"tokens": len(tokens), "count": len(tokens)}
 
 
 @router.post("/context/snapshot/save")
@@ -105,8 +123,18 @@ async def restore_context_snapshot_endpoint(request: Request):
 		body = {}
 	snapshot_id = body.get("snapshot_id", "caller_agent")
 	priority = bool(body.get("priority", False))
+	t0 = time.time()
 	success = engine.restore_context_snapshot(snapshot_id=snapshot_id, priority=priority)
-	return {"status": "ok" if success else "failed", "snapshot_id": snapshot_id}
+	restore_duration = getattr(engine, "last_restore_duration", round(time.time() - t0, 4))
+	from backend.engine import calcular_kv_ram_mb
+	from backend.config import N_CTX
+	kv_ram = calcular_kv_ram_mb(N_CTX // 4)
+	return {
+		"status": "ok" if success else "failed",
+		"snapshot_id": snapshot_id,
+		"restore_time_seconds": restore_duration,
+		"kv_cache_ram_mb": kv_ram
+	}
 
 
 @router.post("/embeddings")

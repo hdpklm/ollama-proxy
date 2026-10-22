@@ -991,3 +991,21 @@
 	- Conectado `interface/backend/services/llm_client.py` con métodos asíncronos para solicitar congelación y restauración de snapshots al proxy.
 	- Actualizado `SubAgent.run` en `interface/backend/services/sub_agents.py` para congelar el contexto activo del llamador antes de iniciar el sub-agente y restaurarlo inmediatamente en bloque `finally`, permitiendo al agente principal continuar sin re-cálculos de tokens.
 	- Actualizado `project_status.md` a la versión `v0.9.10`.
+
+### 📝 Registro: [v0.9.11] - Arquitectura de Doble WebSocket en Chat (Streaming + Métricas Granulares por Etapas)
+- **date-time**: 2026-10-22 13:38:00
+- **Problema**:
+	- Al realizar una consulta en la interfaz de chat, la conexión WebSocket única mezclaba la entrega de tokens y telemetría, careciendo de un canal dedicado para desplegar por etapas los resultados de rendimiento: tiempo de carga y estado del modelo en memoria, duración y velocidad TPS de evaluación del prompt, métricas aisladas para cada sub-agente, tiempo de restauración del KV-Cache de sesión y su peso en RAM, y duración con desglose de tokens (petición de agente, respuesta de función y total) para cada tool-calling.
+- **Causa**:
+	- Ausencia de un canal de eventos y métricas no-streaming desacoplado del stream de tokens y síntesis TTS, así como falta de recolección y emisión estructurada de telemetría de modelos, snapshots KV, sub-agentes y conteo de tokens de herramientas.
+- **Solución**:
+	- Creado `TurnMetricsManager` y nuevo endpoint `[WS] /ws/chat/metrics` en `interface/backend/routes/call_ws.py`, desacoplando la emisión de telemetría de `/ws/chat` (dedicado exclusivamente a tokens en tiempo real y audio TTS).
+	- Implementada la captura y emisión en vivo de las 5 métricas requeridas:
+		1. Carga del modelo (`model_load`): nombre del modelo, estado en memoria RAM mmap y tiempo de carga.
+		2. Evaluación del prompt (`prompt_execution`): conteo de tokens, tiempo de ejecución y velocidad TPS.
+		3. Telemetría de sub-agentes (`sub_agent`): métricas completas independientes (prompt, generación, tiempos, TPS y restore KV/RAM).
+		4. Restauración de sesión y KV-cache (`kv_cache`): tiempo de restauración y peso en RAM (MB).
+		5. Tool-calling detallado (`tool_execution`): tiempo de ejecución de la función, tokens de la llamada del agente, tokens de la respuesta de la función y total acumulado.
+	- Añadido endpoint `/v1/tokenize` y enriquecidos endpoints `/v1/models` y `/v1/context/snapshot/restore` en `backend/routes.py`, `backend/engine.py`, `backend/scheduler.py` y `backend/responses.py`.
+	- Actualizado `interface/backend/services/sub_agents.py` y `interface/backend/services/tool_executor.py` para medir y emitir métricas en cada delegación.
+	- Modificado `interface/frontend/src/components/ChatView.jsx` para inicializar en paralelo ambos WebSockets (`/ws/chat` y `/ws/chat/metrics?turn_id=...`), y rediseñado el visor desplegable de "Métricas" con tarjetas estructuradas para cada etapa y sub-agente.

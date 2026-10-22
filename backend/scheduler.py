@@ -6,6 +6,7 @@ import traceback
 from typing import Optional
 
 from backend.job import DELTA, DONE, ERROR, Job
+from backend.engine import calcular_kv_ram_mb
 
 
 class Scheduler:
@@ -79,6 +80,7 @@ class Scheduler:
 						self.current_high.t_first_token = now
 						self.current_high.prompt_eval_seconds = max(now - self.current_high.t_start, 0.001)
 						self.current_high.prompt_tps = round(self.current_high.prompt_tokens / self.current_high.prompt_eval_seconds, 2)
+						self.current_high.kv_cache_ram_mb = calcular_kv_ram_mb(self.current_high.prompt_tokens)
 
 					chunk_data, finish = self.engine.extract_chunk(self.current_high, chunk)
 					if chunk_data:
@@ -94,6 +96,7 @@ class Scheduler:
 							self.current_high.partial += text_val
 
 						self.current_high.generated += 1
+						self.current_high.kv_cache_ram_mb = calcular_kv_ram_mb(self.current_high.prompt_tokens + self.current_high.generated)
 						gen_time = max(now - self.current_high.t_first_token, 0.001)
 						self.current_high.generation_seconds = round(gen_time, 2)
 						self.current_high.generation_tps = round(self.current_high.generated / gen_time, 2)
@@ -148,6 +151,7 @@ class Scheduler:
 						self.current_low.t_first_token = now
 						self.current_low.prompt_eval_seconds = max(now - self.current_low.t_start, 0.001)
 						self.current_low.prompt_tps = round(self.current_low.prompt_tokens / self.current_low.prompt_eval_seconds, 2)
+						self.current_low.kv_cache_ram_mb = calcular_kv_ram_mb(self.current_low.prompt_tokens)
 
 					chunk_data, finish = self.engine.extract_chunk(self.current_low, chunk)
 					if chunk_data:
@@ -163,6 +167,7 @@ class Scheduler:
 							self.current_low.partial += text_val
 
 						self.current_low.generated += 1
+						self.current_low.kv_cache_ram_mb = calcular_kv_ram_mb(self.current_low.prompt_tokens + self.current_low.generated)
 						gen_time = max(now - self.current_low.t_first_token, 0.001)
 						self.current_low.generation_seconds = round(gen_time, 2)
 						self.current_low.generation_tps = round(self.current_low.generated / gen_time, 2)

@@ -12,11 +12,16 @@ class SubAgent:
 		self.system_prompt = system_prompt
 		self.model = model or settings.LLM_MODEL
 		self.temperature = temperature
+		self.last_metrics: Dict[str, Any] | None = None
 
-	async def run(self, task: str, context: str = "") -> str:
+	async def run(self, task: str, context: str = "", on_metric: Any = None) -> str:
+		import time
+		t_start = time.time()
 		snapshot_id = f"caller_before_{self.name}"
 		# Preserve active caller KV context in RAM before running sub-agent
 		await llm_service.save_context_snapshot(snapshot_id=snapshot_id, priority=False)
+
+		model_info = await llm_service.get_model_info(self.model)
 
 		messages = [{"role": "system", "content": self.system_prompt}]
 		if context:
@@ -24,6 +29,8 @@ class SubAgent:
 		else:
 			messages.append({"role": "user", "content": task})
 
+		res: Dict[str, Any] = {}
+		restore_info: Dict[str, Any] = {}
 		try:
 			res = await llm_service.chat(
 				messages=messages,
@@ -40,7 +47,38 @@ class SubAgent:
 			return f"[{self.name}] Error de ejecución: {str(e)}"
 		finally:
 			# Restore caller KV context in RAM immediately so main agent can resume without re-evaluating
-			await llm_service.restore_context_snapshot(snapshot_id=snapshot_id, priority=False)
+			restore_info = await llm_service.restore_context_snapshot(snapshot_id=snapshot_id, priority=False)
+			total_duration = round(time.time() - t_start, 3)
+			usage = res.get("usage", {})
+			prompt_tokens = usage.get("prompt_tokens", 0)
+			prompt_eval_seconds = usage.get("prompt_eval_seconds", 0.0)
+			prompt_tps = usage.get("prompt_tokens_per_second") or usage.get("prompt_token_s", 0.0)
+			completion_tokens = usage.get("completion_tokens", 0)
+			generation_seconds = usage.get("generation_seconds", 0.0)
+			generation_tps = usage.get("tokens_per_second") or usage.get("generate_token_s", 0.0)
+
+			self.last_metrics = {
+				"name": self.name,
+				"model": self.model,
+				"model_load_time_seconds": model_info.get("load_time_seconds", 0.0),
+				"model_in_memory": model_info.get("in_memory", True),
+				"duration_seconds": total_duration,
+				"prompt_tokens": prompt_tokens,
+				"prompt_eval_seconds": prompt_eval_seconds,
+				"prompt_tps": prompt_tps,
+				"completion_tokens": completion_tokens,
+				"generation_seconds": generation_seconds,
+				"generation_tps": generation_tps,
+				"total_tokens": usage.get("total_tokens", prompt_tokens + completion_tokens),
+				"kv_restore_time_seconds": restore_info.get("restore_time_seconds", 0.0),
+				"kv_cache_ram_mb": restore_info.get("kv_cache_ram_mb") or res.get("kv_cache_ram_mb", 0.0)
+			}
+
+			if on_metric and callable(on_metric):
+				try:
+					await on_metric(self.last_metrics)
+				except Exception:
+					pass
 
 # Predefined specialized sub-agents
 _RESEARCHER_PROMPT = (
