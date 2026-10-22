@@ -992,7 +992,43 @@
 	- Actualizado `SubAgent.run` en `interface/backend/services/sub_agents.py` para congelar el contexto activo del llamador antes de iniciar el sub-agente y restaurarlo inmediatamente en bloque `finally`, permitiendo al agente principal continuar sin re-cálculos de tokens.
 	- Actualizado `project_status.md` a la versión `v0.9.10`.
 
-### 📝 Registro: [v0.9.11] - Arquitectura de Doble WebSocket en Chat (Streaming + Métricas Granulares por Etapas)
+### 📝 Registro: [v0.9.6] - Transferencia Unificada en send.bat con Autenticacion SSH Unica
+- **date-time**: 2026-10-21 18:18:00
+- **Problema**:
+	- `send.bat` ejecutaba una conexión SSH independiente por cada contenedor (`docker save img | ssh ...`), obligando al usuario a introducir la contraseña 5 veces consecutivas.
+	- Existían errores de sintaxis en `cmd` debido a caracteres no escapados (`&`, `->`) y saltos de línea LF.
+- **Causa**:
+	- Diseño secuencial iterativo de `send.bat` que invocaba `ssh` por cada imagen por separado.
+- **Solución**:
+	- Se refactorizó `send.bat` para acumular todas las imágenes seleccionadas en un único comando `docker save [imgs...] | ssh user@ip "docker load"`.
+	- Ahora SSH se ejecuta una sola vez y solicita la contraseña una única vez para todo el conjunto.
+	- Se corrigieron los caracteres especiales y se normalizaron todos los `.bat` a CRLF.
+
+### 📝 Registro: [v0.9.11] - Centralizacion de scripts en cmd/ y flujo con Docker Hub local
+- **date-time**: 2026-10-22 01:53:00
+- **Problema**:
+	- Multiplicidad de scripts .bat en la raiz del proyecto y lentitud/inestabilidad de la transferencia directa por pipes SSH (docker save | docker load).
+- **Causa**:
+	- No existia un directorio unificado de comandos de ciclo de vida ni un mecanismo nativo de distribucion de imagenes por red local LAN.
+- **Solución**:
+	- Creacion de directorio `cmd/` con los scripts unificados:
+		- `setup-hub.bat`: Levanta el contenedor `local-registry` (`registry:2`) en el puerto 5050 del host Windows.
+		- `build-rpi5.bat`: Compila las imagenes para `linux/arm64` (:RPi5) y las sube automaticamente al Hub local.
+		- `build-linux.bat`: Compila las imagenes nativas para `linux/amd64` (:linux).
+		- `load-rpi5.sh`: Script bash para Raspberry Pi 5 que descarga via `docker pull` por LAN, re-etiqueta con nombres limpios y elimina tags del hub.
+	- Copia y permisos de ejecucion de `load-rpi5.sh` directamente en la Raspberry Pi 5.
+	- Limpieza y eliminacion de todos los `.bat` obsoletos en la raiz del repositorio.
+
+### 📝 Registro: [v0.9.11] - Script de compilacion nativa en RPi5 (build-on-rpi5.sh)
+- **date-time**: 2026-10-22 01:59:00
+- **Problema**:
+	- Se requiere la posibilidad de compilar los contenedores directamente y de forma nativa en la propia Raspberry Pi 5 sin depender del PC.
+- **Causa**:
+	- Hasta ahora la compilacion ARM64 dependia del emulador buildx del PC o de scripts locales de Windows.
+- **Solución**:
+	- Creacion de `cmd/build-on-rpi5.sh` con deteccion automatica del directorio raiz, compilacion nativa con tag `:RPi5` para todos los servicios o servicio individual, y despliegue directo con permisos de ejecucion en la RPi5.
+
+### 📝 Registro: [v0.9.12] - Arquitectura de Doble WebSocket en Chat (Streaming + Métricas Granulares por Etapas)
 - **date-time**: 2026-10-22 13:38:00
 - **Problema**:
 	- Al realizar una consulta en la interfaz de chat, la conexión WebSocket única mezclaba la entrega de tokens y telemetría, careciendo de un canal dedicado para desplegar por etapas los resultados de rendimiento: tiempo de carga y estado del modelo en memoria, duración y velocidad TPS de evaluación del prompt, métricas aisladas para cada sub-agente, tiempo de restauración del KV-Cache de sesión y su peso en RAM, y duración con desglose de tokens (petición de agente, respuesta de función y total) para cada tool-calling.
