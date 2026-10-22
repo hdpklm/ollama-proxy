@@ -1,12 +1,13 @@
 import json
 from typing import Dict, Any, List
-from config import settings
+from config import settings, load_prompt
 from services.llm_client import LLMClient
 
 llm_service = LLMClient()
 
 class SubAgent:
-	def __init__(self, name: str, description: str, system_prompt: str, model: str | None = None, temperature: float = 0.3):
+	def __init__(self, key: str, name: str, description: str, system_prompt: str, model: str | None = None, temperature: float = 0.3):
+		self.key = key
 		self.name = name
 		self.description = description
 		self.system_prompt = system_prompt
@@ -17,13 +18,14 @@ class SubAgent:
 	async def run(self, task: str, context: str = "", on_metric: Any = None) -> str:
 		import time
 		t_start = time.time()
-		snapshot_id = f"caller_before_{self.name}"
+		snapshot_id = f"caller_before_{self.key}"
 		# Preserve active caller KV context in RAM before running sub-agent
 		await llm_service.save_context_snapshot(snapshot_id=snapshot_id, priority=False)
 
 		model_info = await llm_service.get_model_info(self.model)
 
-		messages = [{"role": "system", "content": self.system_prompt}]
+		prompt = load_prompt(self.key, fallback=self.system_prompt)
+		messages = [{"role": "system", "content": prompt}]
 		if context:
 			messages.append({"role": "user", "content": f"Contexto previo:\n{context}\n\nTarea a resolver:\n{task}"})
 		else:
@@ -100,21 +102,24 @@ _WRITER_PROMPT = (
 
 SUB_AGENTS: Dict[str, SubAgent] = {
 	"researcher": SubAgent(
+		key="researcher",
 		name="Investigador",
 		description="Delega consultas complejas de análisis técnico, investigación y síntesis de datos factuales.",
-		system_prompt=_RESEARCHER_PROMPT,
+		system_prompt=load_prompt("researcher", fallback=_RESEARCHER_PROMPT),
 		temperature=0.2
 	),
 	"coder": SubAgent(
+		key="coder",
 		name="Programador",
 		description="Delega tareas de desarrollo de software, algoritmos, depuración y arquitectura de código.",
-		system_prompt=_CODER_PROMPT,
+		system_prompt=load_prompt("coder", fallback=_CODER_PROMPT),
 		temperature=0.1
 	),
 	"writer": SubAgent(
+		key="writer",
 		name="Redactor",
 		description="Delega redacción de correos, síntesis ejecutivas, comunicados formales o mejora de estilo.",
-		system_prompt=_WRITER_PROMPT,
+		system_prompt=load_prompt("writer", fallback=_WRITER_PROMPT),
 		temperature=0.6
 	)
 }

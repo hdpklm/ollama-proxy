@@ -1073,3 +1073,21 @@
 	- Se verificó la sintaxis de todos los archivos modificados con `py_compile`.
 	- Se sincronizaron los archivos corregidos hacia la Raspberry Pi 5 y se reiniciaron los contenedores `ollama-proxy` e `interface`.
 	- Se validó el endpoint `/api/proxy/memory` verificando la entrega correcta del desglose de memoria RAM (proceso RSS/VMS, modelo base en MB/GB, contextos KV y prompt caches precalentadas).
+
+### 📝 Registro: [v0.9.15] - Centralización de system prompts en carpeta raíz /prompts
+- **date-time**: 2026-10-23 01:21:40
+- **Problema**:
+	- Los system prompts se encontraban dispersos e inconsistentes: el prompt principal estaba en `interface/backend/system_prompt.md` (con fallbacks en código en `config.py` y `prompt_cache.py`), mientras que los prompts de sub-agentes (`researcher`, `coder`, `writer`) estaban definidos como cadenas de texto fijas en `interface/backend/services/sub_agents.py` y replicados en `backend/prompt_cache.py`.
+- **Causa**:
+	- Crecimiento modular sin una carpeta centralizada compartida para todas las directrices de los agentes y sub-agentes del sistema.
+- **Solución**:
+	- Se creó el directorio centralizado [`prompts/`](file:///c:/work/person/hassan/Repos/ollama-proxy/prompts/) en la raíz del repositorio con los archivos Markdown:
+		- `prompts/system_prompt.md`: Directivas del asistente conversacional principal.
+		- `prompts/researcher.md`: Directivas del sub-agente investigador.
+		- `prompts/coder.md`: Directivas del sub-agente programador.
+		- `prompts/writer.md`: Directivas del sub-agente redactor.
+	- `interface/backend/config.py`: Se implementaron `get_prompts_dir()` y `load_prompt(name)` para localizar y cargar dinámicamente cualquier prompt desde `prompts/` con fallback de compatibilidad.
+	- `interface/backend/services/sub_agents.py`: Se adaptó la clase `SubAgent` para cargar dinámicamente el prompt Markdown en tiempo de ejecución.
+	- `backend/prompt_cache.py`: Se implementó `load_all_agent_prompts()` para descubrir e indexar automáticamente todos los archivos de prompt existentes en `prompts/` y pre-calentar sus cachés KV en RAM.
+	- `docker-compose.yml`: Se añadió el montaje de volumen `./prompts:/app/prompts:ro` tanto en el servicio `ollama-proxy` como en `interface`.
+	- Se desplegaron los cambios en la Raspberry Pi 5 y se verificó la recarga en caliente de los prompts y su pre-calentamiento en RAM.

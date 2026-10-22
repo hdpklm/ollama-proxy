@@ -11,50 +11,62 @@ try:
 except ImportError:
 	PROMPT_CACHE_DIR = os.getenv("PROMPT_CACHE_DIR", "./cache/prompt_states")
 
-def _load_system_prompt_from_file() -> str | None:
-	search_paths = [
-		os.getenv("SYSTEM_PROMPT_PATH", ""),
-		"./interface/backend/system_prompt.md",
-		"/app/interface/backend/system_prompt.md",
-		"system_prompt.md",
+def load_all_agent_prompts() -> Dict[str, str]:
+	prompts: Dict[str, str] = {
+		"main_agent": (
+			"Eres un asistente conversacional inteligente, conciso y directo en español.\n"
+			"La marca de tiempo al inicio de los mensajes indica la fecha y hora local actual del usuario (Europe/Madrid). A partir de ella calcula directamente días como hoy, mañana o ayer sin pedir confirmación de fechas.\n"
+			"Dispones de herramientas nativas (como `search_web`) para consultar datos en tiempo real (meteorología, noticias o datos recientes). Úsalas directamente cuando te consulten sobre el tiempo o información actualizada.\n"
+			"Dispones también de sub-agentes especializados (`delegate_to_researcher`, `delegate_to_coder`, `delegate_to_writer`) para delegar tareas complejas de análisis técnico/investigación, programación/arquitectura o redacción ejecutiva.\n"
+			"NUNCA repitas marcas de tiempo ni encabezados entre corchetes en tus respuestas. Responde con naturalidad, precisión y brevedad."
+		),
+		"researcher": (
+			"Eres un sub-agente especialista en investigación y análisis factual riguroso.\n"
+			"Tu cometido es sintetizar información técnica, científica o documental con máxima precisión.\n"
+			"Estructura tus hallazgos en puntos clave, resalta datos concretos y evita divagaciones."
+		),
+		"coder": (
+			"Eres un sub-agente ingeniero de software senior.\n"
+			"Tu cometido es generar código limpio, seguro, eficiente y bien estructurado (siguiendo principios SOLID/SRP).\n"
+			"Proporciona implementaciones funcionales y explicaciones concisas directamente enfocadas en la solución técnica."
+		),
+		"writer": (
+			"Eres un sub-agente especialista en redacción ejecutiva y comunicación clara.\n"
+			"Tu cometido es redactar correos, documentos, resúmenes o comunicados con un tono pulido, profesional y elocuente."
+		)
+	}
+
+	search_dirs = [
+		os.getenv("PROMPTS_DIR", ""),
+		"/app/prompts",
+		"./prompts",
+		"../prompts",
+		os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "prompts"))
 	]
-	for p in search_paths:
-		if p and os.path.exists(p):
-			try:
-				with open(p, "r", encoding="utf-8") as f:
-					content = f.read().strip()
-					if content:
-						return content
-			except Exception:
-				pass
-	return None
+	prompts_dir = None
+	for d in search_dirs:
+		if d and os.path.isdir(d):
+			prompts_dir = d
+			break
 
-_MAIN_PROMPT_FILE = _load_system_prompt_from_file()
+	if prompts_dir:
+		for filename in os.listdir(prompts_dir):
+			if filename.endswith(".md") or filename.endswith(".txt"):
+				stem = os.path.splitext(filename)[0]
+				filepath = os.path.join(prompts_dir, filename)
+				try:
+					with open(filepath, "r", encoding="utf-8") as f:
+						content = f.read().strip()
+						if content:
+							if stem in ("system_prompt", "main", "main_agent"):
+								prompts["main_agent"] = content
+							else:
+								prompts[stem] = content
+				except Exception:
+					pass
+	return prompts
 
-# Default system prompts for pre-warming agents and sub-agents
-DEFAULT_AGENT_PROMPTS: Dict[str, str] = {
-	"main_agent": _MAIN_PROMPT_FILE or (
-		"Eres un asistente conversacional inteligente, conciso y directo en español.\n"
-		"La marca de tiempo al inicio de los mensajes indica la fecha y hora local actual del usuario (Europe/Madrid). A partir de ella calcula directamente días como hoy, mañana o ayer sin pedir confirmación de fechas.\n"
-		"Dispones de herramientas nativas (como search_web) para consultar datos en tiempo real (meteorología, noticias o datos recientes). Úsalas directamente cuando te consulten sobre el tiempo o información actualizada.\n"
-		"Dispones también de sub-agentes especializados (delegate_to_researcher, delegate_to_coder, delegate_to_writer) para delegar tareas complejas de análisis técnico, código o redacción formal.\n"
-		"NUNCA repitas marcas de tiempo ni encabezados entre corchetes en tus respuestas. Responde con naturalidad, precisión y brevedad."
-	),
-	"researcher": (
-		"Eres un sub-agente especialista en investigación y análisis factual riguroso.\n"
-		"Tu cometido es sintetizar información técnica, científica o documental con máxima precisión.\n"
-		"Estructura tus hallazgos en puntos clave, resalta datos concretos y evita divagaciones."
-	),
-	"coder": (
-		"Eres un sub-agente ingeniero de software senior.\n"
-		"Tu cometido es generar código limpio, seguro, eficiente y bien estructurado (siguiendo principios SOLID/SRP).\n"
-		"Proporciona implementaciones funcionales y explicaciones concisas directamente enfocadas en la solución técnica."
-	),
-	"writer": (
-		"Eres un sub-agente especialista en redacción ejecutiva y comunicación clara.\n"
-		"Tu cometido es redactar correos, documentos, resúmenes o comunicados con un tono pulido, profesional y elocuente."
-	)
-}
+DEFAULT_AGENT_PROMPTS: Dict[str, str] = load_all_agent_prompts()
 
 
 class PromptCacheManager:

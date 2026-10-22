@@ -1,4 +1,4 @@
-# Project Status - Ollama Priority Proxy v0.9.14
+# Project Status - Ollama Priority Proxy v0.9.15
 
 ## Arquitectura: Strict Preemptive Token Scheduler (Dual-Context Shared Weights) + Native OpenAI Tool-Calling Engine + Model Adapter Architecture + Dual Target Build System (linux / RPi5) + Local Docker Hub Distribution Engine (registry:2 on LAN) + Interface Voice/Chat Module (PWA) + Standalone TTS/STT Services + Standalone Web-Tools + Redis Stack Vector RAG + Dual-WebSocket Chat & Real-Time Metrics Pipeline + Binary KV Prompt Cache Engine + Nested Sub-Agent Context Snapshot Stack
 Proxy HTTP y planificador de tokens por turno estricto con contextos KV independientes (alta/baja prioridad), pesos compartidos en memoria de solo lectura, arquitectura de adaptadores de modelo desacoplados (`services/adapters`) para dialéctos de LLM (Gemma 4, Qwen, OpenAI estándar), sistema de compilación dual con diferenciación estricta de tags (`:linux` para arquitectura local nativa AMD64 sin emulación QEMU y `:RPi5` para ARM64 destinado a Raspberry Pi 5 vía `IMAGE_TAG`), motor de distribución mediante Docker Hub local privado (`registry:2` en puerto 5050) para descargas masivas concurrentes en LAN hacia Raspberry Pi 5 sin saturación de sockets SSH, motor de tool-calling nativo compatible con la API de OpenAI preservando estrictamente todas las características de request (`priority`, `fast`, `max_tokens`, `temperature`, `tools`) y response (`priority`, `times_paused`, `kv_cache_ram_mb`, métricas TPS de prompt y generación), arquitectura de doble WebSocket en interfaz de chat (`/ws/chat` para streaming ultra-rápido de tokens y audio TTS + `/ws/chat/metrics` no-streaming para telemetría granular de etapas: carga de modelo, evaluación de prompt, sub-agentes independientes, restauración de sesión/KV cache en RAM y desglose de tokens/duración por tool-calling), sistema de cache binario en disco y precarga en memoria RAM de estados KV de system prompts para agente principal y sub-agentes con invalidación por hash SHA256 (`backend/prompt_cache.py`), pila de congelación y restauración inmediata de contexto en RAM (`save_context_snapshot` / `restore_context_snapshot`) que preserva el estado del agente principal al delegar en sub-agentes para continuar sin re-cálculos de tokens, módulo desacoplado de interfaz web PWA instalable en Android/navegador (React + Vite + Tailwind + Service Worker + Manifest), backend orquestador de voz/llamadas (FastAPI + WebSockets + STT + TTS), microservicios independientes para Piper TTS, Vosk STT y Web-Tools (Parallel/DDG search, trafilatura reader y PDF extractor), persistencia y búsqueda vectorial RAG en Redis Stack (`/docker/storage/redis`), y suite centralizada de utilidades en `cmd/` (`setup-hub.bat`, `build-rpi5.bat`, `build-linux.bat`, `load-rpi5.sh`, `build-on-rpi5.sh`, `run.bat`).
@@ -31,10 +31,15 @@ Proxy HTTP y planificador de tokens por turno estricto con contextos KV independ
 - `main.py`: Microservicio FastAPI que expone Vosk STT en el puerto 2700 (HTTP POST y WebSocket bidireccional) con el modelo `vosk-model-small-es-0.42`.
 - `Dockerfile`: Contenedor independiente con Python 3.11, gestor `uv` y cache compartida.
 
+### `prompts/`
+- `system_prompt.md`: Prompt conversacional puro del asistente principal sin marcas de tiempo ni encabezados en texto.
+- `researcher.md`: Directivas del sub-agente investigador para análisis técnico, científico y síntesis factual rigurosa.
+- `coder.md`: Directivas del sub-agente programador para generación de código seguro, limpio y buenas prácticas SOLID/SRP.
+- `writer.md`: Directivas del sub-agente redactor para comunicados formales, correos y síntesis ejecutiva.
+
 ### `interface/backend`
 - `main.py`: Inicializa la aplicacion FastAPI del modulo interface, monta rutas REST/WebSocket y sirve los estaticos compilados de `frontend/dist`.
-- `config.py`: Centraliza variables de entorno para endpoints externos de LLM, STT, TTS, Web-Tools y Redis, e inyeccion limpia de `system_prompt.md`.
-- `system_prompt.md`: Prompt conversacional puro sin inyeccion artificial de esquemas en texto.
+- `config.py`: Centraliza variables de entorno y provee funciones (`load_prompt`, `load_default_system_prompt`) para cargar dinámicamente los prompts desde `prompts/`.
 - `routes/chat.py`: Endpoints REST para interaccion chat con bucle agéntico desacoplado mediante `services.adapters`.
 - `routes/call_ws.py`: Handlers WebSocket para llamadas de voz (/ws/call) y chat (/ws/chat) delegando el parseo y formateo de turnos a `services.adapters`, con streaming seguro hacia TTS y emisión de debug.
 - `routes/web_tools.py`: Endpoints REST `/api/tools/search`, `/api/tools/read` y `/api/tools/pdf`.

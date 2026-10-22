@@ -32,6 +32,7 @@ services:
     volumes:
       - ./backend:/app/backend
       - ./main.py:/app/main.py
+      - ./prompts:/app/prompts:ro
       - ${OLLAMA_MODELS_DIR:-/usr/share/ollama/.ollama/models/blobs}:/usr/share/ollama/.ollama/models/blobs:ro
       - ./modelos:/app/modelos:ro
       - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
@@ -74,6 +75,7 @@ services:
       - ./interface/backend/main.py:/app/main.py
       - ./interface/backend/config.py:/app/config.py
       - ./interface/backend/system_prompt.md:/app/system_prompt.md
+      - ./prompts:/app/prompts:ro
       - ./interface/frontend/dist:/app/frontend/dist
       - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv
     restart: unless-stopped
