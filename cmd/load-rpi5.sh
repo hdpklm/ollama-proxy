@@ -1,4 +1,33 @@
 #!/bin/bash
+# ==============================================================================
+# Usage Examples / Ejemplos de Uso:
+#
+# 1. Default (IP: 192.168.1.116, Port: 5050, Target: all):
+#    ./cmd/load-rpi5.sh
+#
+# 2. Change Server IP (Cambiar IP del server Hub):
+#    HUB_IP=192.168.1.200 ./cmd/load-rpi5.sh
+#
+# 3. Change Port (Cambiar puerto del Hub):
+#    HUB_PORT=6000 ./cmd/load-rpi5.sh
+#
+# 4. Change both IP and Port (Cambiar IP y puerto a la vez):
+#    HUB_IP=192.168.1.200 HUB_PORT=6000 ./cmd/load-rpi5.sh
+#
+# 5. Target specific service with custom IP (Descargar servicio especifico):
+#    HUB_IP=192.168.1.200 ./cmd/load-rpi5.sh ollama-proxy
+#
+# 6. With sudo (la variable debe ir DESPUES de sudo para que no la borre):
+#    sudo HUB_IP=100.100.1.236 bash ./cmd/load-rpi5.sh
+#    # o con permisos de ejecucion:
+#    # chmod +x ./cmd/load-rpi5.sh
+#    # sudo HUB_IP=100.100.1.236 ./cmd/load-rpi5.sh
+#
+# 7. Persistent export in terminal session (Exportar en la sesion actual):
+#    export HUB_IP=192.168.1.200
+#    export HUB_PORT=5050
+#    ./cmd/load-rpi5.sh
+# ==============================================================================
 set -e
 
 HUB_IP="${HUB_IP:-192.168.1.116}"
