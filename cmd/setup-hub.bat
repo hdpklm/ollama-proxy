@@ -13,7 +13,7 @@ echo.
 docker inspect %CONTAINER_NAME% >nul 2>&1
 if errorlevel 1 (
 	echo [*] Creando y arrancando contenedor '%CONTAINER_NAME%'...
-	docker run -d -p %REGISTRY_PORT%:5000 --restart always --name %CONTAINER_NAME% registry:2
+	docker run -d -p %REGISTRY_PORT%:5000 --restart always -v registry_data:/var/lib/registry --name %CONTAINER_NAME% registry:2
 	if errorlevel 1 (
 		echo [ERROR] No se pudo iniciar el contenedor '%CONTAINER_NAME%'.
 		pause

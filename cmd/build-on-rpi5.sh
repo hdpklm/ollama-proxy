@@ -30,7 +30,7 @@ build_service() {
 	echo "------------------------------------------------------------"
 	echo "[*] Compilando ${name}:${TAG} desde ${ctx}..."
 	echo "------------------------------------------------------------"
-	docker build -t "${name}:${TAG}" "${ctx}"
+	docker build --network=host -t "${name}:${TAG}" "${ctx}"
 	echo "[OK] ${name}:${TAG} compilada con exito."
 	echo ""
 }
