@@ -1060,3 +1060,16 @@
 	- `interface/backend/main.py`: Endpoint `/api/proxy/memory` que conecta con el proxy.
 	- `interface/frontend/src/components/MemoryModal.jsx`: Modal con diseño oscuro pulido, auto-refresco y desglose por tarjetas (RAM RSS, Modelo GGUF, Contextos KV, Prompt Caches por agente y Snapshots temporales).
 	- `interface/frontend/src/App.jsx`: Botón con icono de actividad al lado del botón de configuración de voz.
+
+### 📝 Registro: [v0.9.14] - Corrección de SyntaxError en backend/engine.py y restauración de servicio ollama-proxy
+- **date-time**: 2026-10-22 18:48:30
+- **Problema**:
+	- Al consultar el endpoint `/api/proxy/memory` o pulsar el botón de memoria RAM en la interfaz web, el sistema devolvía `{"status":"error","message":"[Errno -2] Name or service not known"}`.
+- **Causa**:
+	- En `backend/engine.py`, el método `restore_context_snapshot` contenía un bloque `try:` sin bloque `except`/`finally` correspondiente, generando un `SyntaxError: expected 'except' or 'finally' block`.
+	- Esto impedía que el proceso Uvicorn de `ollama-proxy` iniciase en el contenedor, quedando en estado de bucle `Restarting (1)`. Al no estar activo el contenedor, el DNS interno de Docker (`ollama-net`) no podía resolver el nombre de host `ollama-proxy`, provocando la excepción `[Errno -2] Name or service not known` en el backend de la interfaz.
+- **Solución**:
+	- Se corrigió `backend/engine.py` completando el bloque `try/except Exception as e:` y retornando `True` tras cargar el estado del contexto.
+	- Se verificó la sintaxis de todos los archivos modificados con `py_compile`.
+	- Se sincronizaron los archivos corregidos hacia la Raspberry Pi 5 y se reiniciaron los contenedores `ollama-proxy` e `interface`.
+	- Se validó el endpoint `/api/proxy/memory` verificando la entrega correcta del desglose de memoria RAM (proceso RSS/VMS, modelo base en MB/GB, contextos KV y prompt caches precalentadas).

@@ -146,6 +146,9 @@ class LlamaEngine:
 				t0 = time.time()
 				llm.load_state(state)
 				self.last_restore_duration = round(time.time() - t0, 4)
+				return True
+			except Exception as e:
+				print(f"[Engine] Failed to restore context snapshot '{snapshot_id}': {e}")
 		return False
 
 	def get_memory_stats(self, scheduler=None) -> dict:
