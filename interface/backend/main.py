@@ -36,6 +36,24 @@ async def health_check():
 		}
 	}
 
+@app.get("/api/proxy/memory")
+async def get_proxy_memory():
+	import httpx
+	headers = {}
+	if settings.API_KEY:
+		headers["Authorization"] = f"Bearer {settings.API_KEY}"
+	async with httpx.AsyncClient(timeout=4.0) as client:
+		try:
+			res = await client.get(f"{settings.LLM_URL}/v1/system/memory", headers=headers)
+			if res.status_code == 200:
+				return res.json()
+			res2 = await client.get(f"{settings.LLM_URL}/api/system/memory")
+			if res2.status_code == 200:
+				return res2.json()
+			return {"status": "error", "message": f"Proxy returned status {res.status_code}"}
+		except Exception as e:
+			return {"status": "error", "message": str(e)}
+
 frontend_dist = os.getenv(
 	"FRONTEND_DIST",
 	os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))

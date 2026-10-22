@@ -146,7 +146,92 @@ class LlamaEngine:
 				t0 = time.time()
 				llm.load_state(state)
 				self.last_restore_duration = round(time.time() - t0, 4)
-				return True
-			except Exception as e:
-				print(f"[Engine] Failed to restore context snapshot '{snapshot_id}': {e}")
 		return False
+
+	def get_memory_stats(self, scheduler=None) -> dict:
+		import os
+		from backend.config import N_CTX, N_CTX_HIGH, FLASH_ATTN, N_THREADS
+
+		# 1. Process RAM from OS
+		rss_mb = 0.0
+		vms_mb = 0.0
+		try:
+			import psutil
+			proc = psutil.Process()
+			mem = proc.memory_info()
+			rss_mb = round(mem.rss / (1024 * 1024), 2)
+			vms_mb = round(mem.vms / (1024 * 1024), 2)
+		except Exception:
+			if os.path.exists("/proc/self/status"):
+				try:
+					with open("/proc/self/status", "r") as f:
+						for line in f:
+							if line.startswith("VmRSS:"):
+								rss_mb = round(float(line.split()[1]) / 1024.0, 2)
+							elif line.startswith("VmSize:"):
+								vms_mb = round(float(line.split()[1]) / 1024.0, 2)
+				except Exception:
+					pass
+
+		# 2. Base Model info
+		model_filename = os.path.basename(self.model_path) if self.model_path else "unknown"
+		model_size_mb = 0.0
+		if self.model_path and os.path.exists(self.model_path):
+			model_size_mb = round(os.path.getsize(self.model_path) / (1024 * 1024), 2)
+
+		# 3. Active KV Contexts
+		high_max_tokens = N_CTX_HIGH
+		high_max_kv_mb = calcular_kv_ram_mb(N_CTX_HIGH)
+		high_current_tokens = 0
+		high_current_kv_mb = 0.0
+		if scheduler and getattr(scheduler, "current_high", None):
+			high_current_tokens = scheduler.current_high.prompt_tokens + scheduler.current_high.generated
+			high_current_kv_mb = calcular_kv_ram_mb(high_current_tokens)
+
+		low_max_tokens = N_CTX
+		low_max_kv_mb = calcular_kv_ram_mb(N_CTX)
+		low_current_tokens = 0
+		low_current_kv_mb = 0.0
+		if scheduler and getattr(scheduler, "current_low", None):
+			low_current_tokens = scheduler.current_low.prompt_tokens + scheduler.current_low.generated
+			low_current_kv_mb = calcular_kv_ram_mb(low_current_tokens)
+
+		# 4. Prompt Caches & Temporal Snapshots
+		cache_breakdown = self.prompt_cache.get_memory_breakdown()
+
+		return {
+			"process": {
+				"rss_mb": rss_mb,
+				"vms_mb": vms_mb,
+			},
+			"model": {
+				"filename": model_filename,
+				"path": self.model_path,
+				"file_size_mb": model_size_mb,
+				"file_size_gb": round(model_size_mb / 1024.0, 2),
+				"flash_attn": FLASH_ATTN,
+				"threads": N_THREADS,
+			},
+			"active_contexts": {
+				"high_priority": {
+					"n_ctx_max": high_max_tokens,
+					"max_kv_ram_mb": high_max_kv_mb,
+					"active_tokens": high_current_tokens,
+					"active_kv_ram_mb": high_current_kv_mb,
+				},
+				"low_priority": {
+					"n_ctx_max": low_max_tokens,
+					"max_kv_ram_mb": low_max_kv_mb,
+					"active_tokens": low_current_tokens,
+					"active_kv_ram_mb": low_current_kv_mb,
+				},
+				"total_allocated_kv_mb": round(high_max_kv_mb + low_max_kv_mb, 2)
+			},
+			"prompt_cache": cache_breakdown,
+			"summary": {
+				"total_ram_rss_mb": rss_mb,
+				"model_weights_mb": model_size_mb,
+				"prompt_caches_total_mb": cache_breakdown.get("prompt_caches_total_mb", 0.0),
+				"temporal_snapshots_total_mb": cache_breakdown.get("temporal_snapshots_total_mb", 0.0),
+			}
+		}

@@ -203,8 +203,61 @@ class PromptCacheManager:
 			if hasattr(llm, "save_state"):
 				state = llm.save_state()
 				self.save_cache(agent_name, prompt_text, state, tokens)
-				return True
 		except Exception as e:
 			print(f"[PromptCache] Error caching new prompt for '{agent_name}': {e}")
-
 		return False
+
+	def get_memory_breakdown(self) -> dict:
+		prompt_caches = []
+		total_prompt_cache_ram_mb = 0.0
+
+		for h, data in self.ram_cache.items():
+			token_count = len(data.get("tokens", []))
+			state = data.get("state")
+			state_bytes = 0
+			if state is not None:
+				try:
+					import sys
+					state_bytes = sys.getsizeof(state)
+				except Exception:
+					pass
+			# KV cache memory formula: 0.125 MB per token
+			kv_mb = round(token_count * 0.125, 2)
+			allocated_mb = max(kv_mb, round(state_bytes / (1024 * 1024), 2))
+			total_prompt_cache_ram_mb += allocated_mb
+			prompt_caches.append({
+				"agent_name": data.get("agent_name", "custom"),
+				"hash": h,
+				"tokens": token_count,
+				"kv_ram_mb": kv_mb,
+				"total_mb": round(allocated_mb, 2)
+			})
+
+		temporal_snapshots = []
+		total_temporal_ram_mb = 0.0
+		for snap_id, state in self.ram_snapshots.items():
+			snap_bytes = 0
+			if state is not None:
+				try:
+					import sys
+					snap_bytes = sys.getsizeof(state)
+				except Exception:
+					pass
+			snap_mb = round(snap_bytes / (1024 * 1024), 2)
+			# Fallback minimum estimate for active Llama state context
+			if snap_mb < 0.1:
+				snap_mb = 16.0
+			total_temporal_ram_mb += snap_mb
+			temporal_snapshots.append({
+				"snapshot_id": snap_id,
+				"total_mb": round(snap_mb, 2)
+			})
+
+		return {
+			"prompt_caches": prompt_caches,
+			"prompt_caches_total_mb": round(total_prompt_cache_ram_mb, 2),
+			"prompt_caches_count": len(prompt_caches),
+			"temporal_snapshots": temporal_snapshots,
+			"temporal_snapshots_total_mb": round(total_temporal_ram_mb, 2),
+			"temporal_snapshots_count": len(temporal_snapshots),
+		}

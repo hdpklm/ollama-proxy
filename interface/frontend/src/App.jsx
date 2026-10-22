@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from "react"
-import { MessageSquare, Phone, Sparkles, Settings as SettingsIcon, Download } from "lucide-react"
+import { MessageSquare, Phone, Sparkles, Settings as SettingsIcon, Download, Activity } from "lucide-react"
 import ChatView from "./components/ChatView"
 import CallView from "./components/CallView"
 import SettingsModal from "./components/SettingsModal"
+import MemoryModal from "./components/MemoryModal"
 import { useVoiceCall } from "./hooks/useVoiceCall"
 
 export default function App() {
 	const [activeTab, setActiveTab] = useState("call")
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+	const [isMemoryOpen, setIsMemoryOpen] = useState(false)
 	const [deferredPrompt, setDeferredPrompt] = useState(null)
 
 	useEffect(() => {
@@ -110,6 +112,15 @@ export default function App() {
 						</button>
 					)}
 
+					{/* Proxy Memory Stats Trigger */}
+					<button
+						onClick={() => setIsMemoryOpen(true)}
+						className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-emerald-400 transition-colors"
+						title="Memoria RAM del Proxy"
+					>
+						<Activity className="w-4 h-4" />
+					</button>
+
 					{/* Settings Trigger */}
 					<button
 						onClick={() => setIsSettingsOpen(true)}
@@ -136,6 +147,12 @@ export default function App() {
 				onClose={() => setIsSettingsOpen(false)}
 				settings={settings}
 				onUpdateSettings={handleUpdateSettings}
+			/>
+
+			{/* Memory Modal */}
+			<MemoryModal
+				isOpen={isMemoryOpen}
+				onClose={() => setIsMemoryOpen(false)}
 			/>
 		</div>
 	)

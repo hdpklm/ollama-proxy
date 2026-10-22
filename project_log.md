@@ -1045,3 +1045,18 @@
 	- Añadido endpoint `/v1/tokenize` y enriquecidos endpoints `/v1/models` y `/v1/context/snapshot/restore` en `backend/routes.py`, `backend/engine.py`, `backend/scheduler.py` y `backend/responses.py`.
 	- Actualizado `interface/backend/services/sub_agents.py` y `interface/backend/services/tool_executor.py` para medir y emitir métricas en cada delegación.
 	- Modificado `interface/frontend/src/components/ChatView.jsx` para inicializar en paralelo ambos WebSockets (`/ws/chat` y `/ws/chat/metrics?turn_id=...`), y rediseñado el visor desplegable de "Métricas" con tarjetas estructuradas para cada etapa y sub-agente.
+
+
+### 📝 Registro: [v0.9.13] - Modal y telemetria de memoria RAM en tiempo real para el Proxy LLM
+- **date-time**: 2026-10-22 18:35:00
+- **Problema**:
+	- Se solicitó visualizar en un popup interactivo la memoria RAM exacta consumida por el proxy LLM, desglosando el modelo base original, todos los prompt caches pre-calentados y todos los temporal snapshots de sub-agentes, accesible junto al botón de configuración.
+- **Causa**:
+	- No existía un endpoint de telemetría de memoria ni un componente visual en el frontend web para consultar el consumo de RAM en tiempo real.
+- **Solución**:
+	- `backend/prompt_cache.py`: Método `get_memory_breakdown()` que computa el desglose de tokens y memoria de cada caché permanente y snapshot temporal en RAM.
+	- `backend/engine.py`: Método `get_memory_stats()` que agrupa memoria RSS/VMS del proceso del sistema, tamaño y parámetros del modelo base GGUF, contextos KV activos (High/Low) y prompt/temporal caches.
+	- `backend/routes.py`: Endpoints `/v1/system/memory` y `/api/system/memory`.
+	- `interface/backend/main.py`: Endpoint `/api/proxy/memory` que conecta con el proxy.
+	- `interface/frontend/src/components/MemoryModal.jsx`: Modal con diseño oscuro pulido, auto-refresco y desglose por tarjetas (RAM RSS, Modelo GGUF, Contextos KV, Prompt Caches por agente y Snapshots temporales).
+	- `interface/frontend/src/App.jsx`: Botón con icono de actividad al lado del botón de configuración de voz.

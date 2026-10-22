@@ -151,6 +151,16 @@ async def passthrough_embeddings(request: Request):
 	return Response(upstream.content, status_code=upstream.status_code, media_type="application/json")
 
 
+@router.get("/system/memory")
+@api_router.get("/api/system/memory")
+async def get_system_memory(request: Request):
+	engine = getattr(request.app.state, "engine", None)
+	if not engine:
+		raise HTTPException(status_code=503, detail="Llama engine not initialized")
+	scheduler = getattr(request.app.state, "scheduler", None)
+	return engine.get_memory_stats(scheduler=scheduler)
+
+
 @api_router.post("/api/generate")
 async def api_generate(request: Request):
 	body = await request.json()
