@@ -24,6 +24,23 @@ fi
 echo "[OK] Hub disponible."
 echo ""
 
+pull_with_retry() {
+	local img="$1"
+	local max_retries=3
+	local attempt=1
+	while [ $attempt -le $max_retries ]; do
+		echo "[*] Descargando capas de ${img} (intento ${attempt}/${max_retries})..."
+		if docker pull "${img}"; then
+			return 0
+		fi
+		echo "[!] Error temporal en la descarga. Pausando 3 segundos antes de reintentar..."
+		sleep 3
+		attempt=$((attempt + 1))
+	done
+	echo "[ERROR] No se pudo descargar ${img} tras ${max_retries} intentos."
+	return 1
+}
+
 if [ "$TARGET" = "all" ]; then
 	SERVICES=("ollama-proxy" "interface" "piper-tts" "vosk-stt" "web-tools")
 else
@@ -32,17 +49,23 @@ fi
 
 for svc in "${SERVICES[@]}"; do
 	echo "------------------------------------------------------------"
-	echo "[*] Descargando ${svc}:${TAG}..."
+	echo "[*] Procesando ${svc}:${TAG}..."
 	echo "------------------------------------------------------------"
-	docker pull "${HUB_HOST}/${svc}:${TAG}"
+	pull_with_retry "${HUB_HOST}/${svc}:${TAG}"
 	docker tag "${HUB_HOST}/${svc}:${TAG}" "${svc}:${TAG}"
 	docker rmi "${HUB_HOST}/${svc}:${TAG}" >/dev/null 2>&1 || true
-	echo "[OK] ${svc}:${TAG} lista en el sistema."
+	echo "[OK] ${svc}:${TAG} lista (eliminado alias ${HUB_HOST})."
 	echo ""
+	sleep 1
+done
+
+# Clean any leftover registry tags
+for lingering in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "^${HUB_HOST}/" || true); do
+	docker rmi "$lingering" >/dev/null 2>&1 || true
 done
 
 echo "============================================================"
-echo "  DESCARGA COMPLETADA"
+echo "  DESCARGA COMPLETADA (TODOS LOS ALIAS IP:PUERTO ELIMINADOS)"
 echo "============================================================"
 echo ""
 docker images | grep -E "ollama-proxy|interface|piper-tts|vosk-stt|web-tools"
