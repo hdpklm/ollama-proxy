@@ -1154,3 +1154,16 @@
 - **Solución**:
 	- Creado `interface/frontend/src/components/HistoryModal.jsx`: Modal interactivo que cuenta con un slider lateral izquierdo scrollable con buscador de conversaciones (`GET /api/logs/conversations`), y un cuerpo principal que muestra los mensajes de usuario agrupados por turno. Cada mensaje funciona como un acordeón desplegable que expone: (1) memoria RAG activa en árbol (`TreeNode`), últimos 10 mensajes y system prompt; (2) llamadas intermedias a herramientas (`tool_call`), sub-agentes (`agent_execution`) y pasos de planes multi-paso (`plan_step`); y (3) la respuesta final emitida por el LLM.
 	- Integrado botón de acceso con icono `History` en la cabecera principal de `interface/frontend/src/App.jsx`.
+
+### 📝 Registro: [v0.9.22] - Corrección de Scroll en Detalles de Mensajes del Historial Web (HistoryModal)
+- **date-time**: 2026-10-23 05:28:00
+- **Problema**:
+	- En el modal de historial de conversaciones (`HistoryModal.jsx`), al abrir el acordeón de un mensaje para ver los detalles (memoria TreeNode RAG, últimos 10 mensajes, system prompt y herramientas utilizadas), el scroll vertical no funcionaba y quedaba bloqueado o inactivo.
+- **Causa**:
+	- La propiedad CSS `overscroll-contain` en los contenedores `<pre>` y `<div>` de los detalles capturaba y descartaba los eventos de la rueda del ratón (*mouse wheel*), impidiendo la propagación (*scroll chaining*) hacia el contenedor principal `<main>`.
+	- En la estructura flexbox del modal, el contenedor del diálogo usaba `h-full max-h-[92vh]`, lo que en algunos navegadores resolvía `height: 100%` a `auto` dentro de un contenedor flex, expandiendo `<main>` a la altura total de su contenido sin disparar el scrollbar interno y quedando cortado por el `overflow-hidden` del diálogo.
+- **Solución**:
+	- En `interface/frontend/src/components/HistoryModal.jsx`:
+		- Se fijó la altura del diálogo modal de forma determinista con `h-[90vh] sm:h-[90dvh]` y se agregó `h-full min-h-0` al contenedor dividido (`flex-col md:flex-row`).
+		- Se eliminó `overscroll-contain` de `<main>` y de todos los bloques internos (`<pre>` y `<div>` de RAG, 10 mensajes, system prompt y ejecuciones de herramientas), permitiendo que el desplazamiento con rueda fluya con total naturalidad sin atrapar el cursor.
+		- Se ajustaron las alturas máximas de los bloques a `max-h-96 overflow-y-auto` con soporte de `break-words whitespace-pre-wrap` y scrollbar estilizado para una lectura cómoda y sin cortes.
