@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 	PROMPTS_DIR: str = os.getenv("PROMPTS_DIR", "")
 	SYSTEM_PROMPT_PATH: str = os.getenv("SYSTEM_PROMPT_PATH", "")
 	HIDE_BACKGROUND: bool = os.getenv("HIDE_BACKGROUND", "false").strip().lower() in ("true", "1", "yes")
+	AGENT_EXECUTION_MODE: str = os.getenv("AGENT_EXECUTION_MODE", "sequential").strip().lower()
 
 	class Config:
 		env_file = ".env"

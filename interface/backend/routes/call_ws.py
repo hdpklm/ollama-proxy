@@ -13,6 +13,11 @@ from services.tool_executor import execute_tool
 from services.tool_definitions import NATIVE_TOOLS
 from services.adapters import get_adapter
 from config import settings, ensure_system_prompt, load_default_system_prompt
+from services.silence_killer import format_silence_killer_status
+from services.tree_context_manager import TreeContextManager
+from services.plan_and_solve import is_complex_request, PlanAndSolveOrchestrator
+
+tree_context_manager = TreeContextManager()
 
 def stamp(text: str) -> str:
 	dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
@@ -150,7 +155,8 @@ async def websocket_call_endpoint(websocket: WebSocket):
 						conversation_history.append({"role": "assistant", "content": None, "tool_calls": accumulated_tool_calls})
 					for tc in tool_calls:
 						print(f"[WS Call] Tool call detected ({adapter.name}): {tc.name} args={tc.args}")
-						await websocket.send_json({"type": "assistant_status", "status": f"Consultando herramienta {tc.name}..."})
+						silence_status = format_silence_killer_status(tc.name, tc.args)
+						await websocket.send_json({"type": "assistant_status", "status": silence_status})
 						if not settings.HIDE_BACKGROUND:
 							await websocket.send_json({
 								"type": "tool_calling",
@@ -509,7 +515,7 @@ async def websocket_chat_metrics_endpoint(websocket: WebSocket):
 async def websocket_chat_endpoint(websocket: WebSocket):
 	await websocket.accept()
 	current_stream_task: asyncio.Task | None = None
-	async def stream_tokens(messages: list, model: str, tts_mode: str = "rpi5", priority: bool = False, fast: bool = True, turn_id: str = ""):
+	async def stream_tokens(messages: list, model: str, tts_mode: str = "rpi5", priority: bool = False, fast: bool = True, turn_id: str = "", branch_id: str = "main", user_prompt_clean: str = ""):
 		from services.agent_manager import load_agent_profile
 		from services.tool_definitions import get_tools_for_agent
 
@@ -631,6 +637,8 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 					if accumulated_tool_calls:
 						messages.append({"role": "assistant", "content": None, "tool_calls": accumulated_tool_calls})
 					for tc in tool_calls:
+						silence_status = format_silence_killer_status(tc.name, tc.args)
+						await websocket.send_json({"type": "assistant_status", "status": silence_status})
 						import time
 						t_tool_start = time.time()
 						req_str = json.dumps({"tool": tc.name, "arguments": tc.args}, ensure_ascii=False)
@@ -729,6 +737,12 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 					done_msg["times_paused"] = paused
 					done_msg["kv_cache_ram_mb"] = kv_ram
 				await websocket.send_json(done_msg)
+
+				if user_prompt_clean:
+					try:
+						await tree_context_manager.add_turn(branch_id, user_prompt_clean, accumulated)
+					except Exception as e_tree:
+						print(f"[WS Chat] Tree add_turn warning: {e_tree}")
 				break
 
 			except asyncio.CancelledError:
@@ -747,7 +761,27 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 		while True:
 			data = await websocket.receive_json()
 			msg_type = data.get("type", "chat")
-			if msg_type in ("chat", "send") or "messages" in data:
+			branch_id = data.get("branch_id", "main")
+
+			if msg_type == "fork_branch":
+				source_id = data.get("source_branch_id", "main")
+				target_id = data.get("new_branch_id", "")
+				new_name = data.get("new_name", "")
+				if target_id:
+					new_branch = await tree_context_manager.fork_branch(source_id, target_id, new_name)
+					await websocket.send_json({"type": "branch_forked", "branch": {"id": new_branch["id"], "name": new_branch["name"]}})
+				continue
+
+			elif msg_type == "archive_rag":
+				topic = data.get("topic", "general")
+				subtopic = data.get("subtopic", "nota")
+				detail = data.get("detail", "detalle")
+				node_data = data.get("data")
+				await tree_context_manager.archive_to_tree(branch_id, topic, subtopic, detail, node_data)
+				await websocket.send_json({"type": "rag_archived", "status": "ok", "topic": topic})
+				continue
+
+			elif msg_type in ("chat", "send") or "messages" in data:
 				if current_stream_task and not current_stream_task.done():
 					current_stream_task.cancel()
 				raw_messages = data.get("messages", [])
@@ -756,7 +790,66 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 				priority = bool(data.get("priority", False))
 				fast = bool(data.get("fast", True))
 				turn_id = data.get("turn_id", "")
+
 				if raw_messages:
+					clean_user_text = ""
+					for m in reversed(raw_messages):
+						if m.get("role") == "user":
+							raw_c = m.get("content", "")
+							if raw_c.startswith("[Fecha y hora actual:"):
+								parts = raw_c.split("]\n", 1)
+								clean_user_text = parts[1] if len(parts) > 1 else raw_c
+							else:
+								clean_user_text = raw_c
+							break
+
+					# Dynamic RAG context projection
+					tree_context = await tree_context_manager.project_context(branch_id, clean_user_text)
+
+					# Check for Plan-and-Solve complex path
+					if clean_user_text and is_complex_request(clean_user_text):
+						async def run_complex_plan():
+							try:
+								async def send_status(status_text: str):
+									await websocket.send_json({"type": "assistant_status", "status": status_text})
+
+								orchestrator = PlanAndSolveOrchestrator()
+								res = await orchestrator.run(clean_user_text, model, on_status=send_status)
+								final_text = res.get("final_text", "")
+								steps = res.get("steps", [])
+
+								# Archive to 3-level tree RAG
+								words = clean_user_text.split()
+								topic_name = " ".join(words[:3])[:25]
+								for s in steps:
+									s_id = s.get("step", 1)
+									s_desc = s.get("description", "")
+									s_res = s.get("result", "")
+									await tree_context_manager.archive_to_tree(
+										branch_id,
+										topic=topic_name,
+										subtopic=f"Paso {s_id}",
+										detail=s_desc[:35],
+										data=s_res[:100]
+									)
+
+								await tree_context_manager.add_turn(branch_id, clean_user_text, final_text, auto_topic=topic_name)
+
+								await websocket.send_json({
+									"type": "done",
+									"full_text": final_text,
+									"steps": steps,
+									"rag_archived": True
+								})
+							except asyncio.CancelledError:
+								pass
+							except Exception as e_plan:
+								await websocket.send_json({"type": "error", "message": str(e_plan)})
+
+						current_stream_task = asyncio.create_task(run_complex_plan())
+						continue
+
+					# Normal direct chat flow with Tree Context injected
 					messages = []
 					for m in raw_messages:
 						if m.get("role") == "user":
@@ -767,8 +860,35 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 								messages.append(m)
 						else:
 							messages.append(m)
-					messages = ensure_system_prompt(messages)
-					current_stream_task = asyncio.create_task(stream_tokens(messages, model, tts_mode, priority=priority, fast=fast, turn_id=turn_id))
+
+					base_sys = load_default_system_prompt()
+					if tree_context:
+						effective_sys = f"{base_sys}\n\n{tree_context}"
+					else:
+						effective_sys = base_sys
+
+					# Replace or inject system prompt with tree context
+					has_sys = False
+					for m in messages:
+						if m.get("role") == "system":
+							m["content"] = effective_sys
+							has_sys = True
+							break
+					if not has_sys:
+						messages.insert(0, {"role": "system", "content": effective_sys})
+
+					current_stream_task = asyncio.create_task(
+						stream_tokens(
+							messages,
+							model,
+							tts_mode,
+							priority=priority,
+							fast=fast,
+							turn_id=turn_id,
+							branch_id=branch_id,
+							user_prompt_clean=clean_user_text
+						)
+					)
 			elif msg_type == "stop":
 				if current_stream_task and not current_stream_task.done():
 					current_stream_task.cancel()

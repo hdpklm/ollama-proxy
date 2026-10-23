@@ -13,7 +13,11 @@ stt_service = STTClient()
 from routes.call_ws import stamp
 from services.tool_executor import execute_tool
 from services.adapters import get_adapter
-from config import ensure_system_prompt, settings
+from config import ensure_system_prompt, settings, load_default_system_prompt
+from services.tree_context_manager import TreeContextManager
+from services.plan_and_solve import is_complex_request, PlanAndSolveOrchestrator
+
+tree_context_manager = TreeContextManager()
 
 class ChatRequest(BaseModel):
 	messages: list[dict]
@@ -22,6 +26,7 @@ class ChatRequest(BaseModel):
 	fast: bool | None = True
 	max_tokens: int | None = None
 	temperature: float | None = None
+	branch_id: str | None = "main"
 
 class TTSRequest(BaseModel):
 	text: str
@@ -33,6 +38,54 @@ import json
 @router.post("/chat")
 async def handle_chat(req: ChatRequest):
 	try:
+		branch_id = req.branch_id or "main"
+		clean_user_text = ""
+		for m in reversed(req.messages):
+			if m.get("role") == "user":
+				raw_c = m.get("content", "")
+				if raw_c.startswith("[Fecha y hora actual:"):
+					parts = raw_c.split("]\n", 1)
+					clean_user_text = parts[1] if len(parts) > 1 else raw_c
+				else:
+					clean_user_text = raw_c
+				break
+
+		selected_model = req.model or settings.LLM_MODEL or "gemma4:e2b"
+
+		# Check for Plan-and-Solve complex path
+		if clean_user_text and is_complex_request(clean_user_text):
+			orchestrator = PlanAndSolveOrchestrator()
+			res = await orchestrator.run(clean_user_text, selected_model)
+			final_text = res.get("final_text", "")
+			steps = res.get("steps", [])
+
+			# Archive to 3-level tree RAG
+			words = clean_user_text.split()
+			topic_name = " ".join(words[:3])[:25]
+			for s in steps:
+				s_id = s.get("step", 1)
+				s_desc = s.get("description", "")
+				s_res = s.get("result", "")
+				await tree_context_manager.archive_to_tree(
+					branch_id,
+					topic=topic_name,
+					subtopic=f"Paso {s_id}",
+					detail=s_desc[:35],
+					data=s_res[:100]
+				)
+
+			await tree_context_manager.add_turn(branch_id, clean_user_text, final_text, auto_topic=topic_name)
+
+			return {
+				"message": {"role": "assistant", "content": final_text},
+				"steps": steps,
+				"rag_archived": True,
+				"tools_used": []
+			}
+
+		# Dynamic RAG context projection
+		tree_context = await tree_context_manager.project_context(branch_id, clean_user_text)
+
 		messages = []
 		for m in req.messages:
 			if m.get("role") == "user":
@@ -43,7 +96,17 @@ async def handle_chat(req: ChatRequest):
 					messages.append(m)
 			else:
 				messages.append(m)
-		messages = ensure_system_prompt(messages)
+
+		base_sys = load_default_system_prompt()
+		effective_sys = f"{base_sys}\n\n{tree_context}" if tree_context else base_sys
+		has_sys = False
+		for m in messages:
+			if m.get("role") == "system":
+				m["content"] = effective_sys
+				has_sys = True
+				break
+		if not has_sys:
+			messages.insert(0, {"role": "system", "content": effective_sys})
 
 		from services.agent_manager import load_agent_profile
 		from services.tool_definitions import get_tools_for_agent
@@ -97,11 +160,19 @@ async def handle_chat(req: ChatRequest):
 			res["tools_used"] = executed_tools
 			if not settings.HIDE_BACKGROUND:
 				res["debug_events"] = debug_events
+			if clean_user_text:
+				assistant_text = res.get("message", {}).get("content", "")
+				if assistant_text:
+					await tree_context_manager.add_turn(branch_id, clean_user_text, assistant_text)
 			return res
 
 		res["tools_used"] = executed_tools
 		if not settings.HIDE_BACKGROUND:
 			res["debug_events"] = debug_events
+		if clean_user_text:
+			assistant_text = res.get("message", {}).get("content", "")
+			if assistant_text:
+				await tree_context_manager.add_turn(branch_id, clean_user_text, assistant_text)
 		return res
 	except Exception as e:
 		import traceback

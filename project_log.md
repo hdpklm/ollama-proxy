@@ -1120,3 +1120,15 @@
 	- [`services/tool_definitions.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/services/tool_definitions.py) y [`services/tool_executor.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/services/tool_executor.py) ahora reexportan limpiamente desde `tools/`.
 	- [`docker-compose.yml`](file:///c:/work/person/hassan/Repos/ollama-proxy/docker-compose.yml): Añadido el volumen `- ./interface/backend/tools:/app/tools`.
 	- Creados tests en `LLM_Test/gemini/tests/test_tools_package.py` y desplegado en la Raspberry Pi 5.
+
+### 📝 Registro: [v0.9.18] - Memoria Jerárquica en Árbol (TreeNode), Mata-Silencio de Cero Coste y Plan-and-Solve con Caché Limpia
+- **date-time**: 2026-10-23 04:35:00
+- **Problema**:
+	- Crecimiento desmedido de contexto y saturación cuadrática O(N^2) en conversaciones extensas, latencia de silencio durante invocación de herramientas, y pérdida de datos concretos al resumir solicitudes multi-paso complejas.
+- **Causa**:
+	- Ausencia de estructuración jerárquica de temas en el RAG, ausencia de ventana deslizante estricta con desruidado, falta de avisos inmediatos al despachar llamadas a herramientas y acumulación indiscriminada de tokens entre tareas.
+- **Solución**:
+	- Creado `interface/backend/services/tree_context_manager.py`: Estructura `TreeNode` en 3 niveles con proyección dinámica de contexto (tema activo expandido y temas inactivos colapsados en 1 línea), soporte de ramas de chat (`branches`), ventana fija de 10 mensajes (5 turnos de usuario + 5 de asistente) y desruidado automático cada 5 turnos.
+	- Creado `interface/backend/services/silence_killer.py`: Formateo en tiempo real de feedback al usuario (< 10 palabras) extrayendo directamente los argumentos de invocación de tools sin generar inferencias duplicadas ni coste de tokens.
+	- Creado `interface/backend/services/plan_and_solve.py`: Detector condicional de peticiones complejas, desglose estructurado en diccionario de tareas, ejecución aislada con contexto limpio por tarea en modo secuencial para RPi5 y síntesis exhaustiva que preserva todos los datos clave.
+	- Integrados los nuevos servicios en `routes/call_ws.py` (/ws/chat y /ws/call) y `routes/chat.py` (/api/chat).
