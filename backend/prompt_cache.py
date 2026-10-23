@@ -11,29 +11,59 @@ try:
 except ImportError:
 	PROMPT_CACHE_DIR = os.getenv("PROMPT_CACHE_DIR", "./cache/prompt_states")
 
+def _parse_and_get_effective_prompt(content: str) -> str:
+	trimmed = content.strip()
+	if not trimmed.startswith("---"):
+		return content
+
+	parts = trimmed.split("---", 2)
+	if len(parts) < 3:
+		return content
+
+	yaml_text = parts[1]
+	body_text = parts[2].strip()
+
+	try:
+		import yaml
+		metadata = yaml.safe_load(yaml_text) or {}
+	except Exception:
+		metadata = {}
+
+	tools_config = metadata.get("tools") or {}
+	if not tools_config:
+		return body_text
+
+	guidelines = ["\n\n## Herramientas Asignadas y Directrices de Uso"]
+	guidelines.append("Dispones ÚNICAMENTE de las siguientes herramientas autorizadas para tu rol:")
+
+	for tool_name, cfg in tools_config.items():
+		if not isinstance(cfg, dict):
+			continue
+		purpose = cfg.get("purpose", "")
+		max_calls = cfg.get("max_calls")
+		rules = cfg.get("rules", [])
+
+		tool_block = [f"- `{tool_name}`:"]
+		if purpose:
+			tool_block.append(f"  - **Propósito**: {purpose}")
+		if rules:
+			tool_block.append("  - **Reglas y Restricciones**:")
+			for r in rules:
+				tool_block.append(f"    * {r}")
+		if max_calls is not None:
+			tool_block.append(f"  - **Límite por turno**: Máximo {max_calls} llamada(s). Prohibido exceder este límite.")
+
+		guidelines.append("\n".join(tool_block))
+
+	guidelines.append("\n**IMPORTANTE**: No intentes invocar ninguna herramienta ajena a esta lista ni superar los límites fijados.")
+	return body_text + "\n" + "\n".join(guidelines)
+
 def load_all_agent_prompts() -> Dict[str, str]:
 	prompts: Dict[str, str] = {
-		"main_agent": (
-			"Eres un asistente conversacional inteligente, conciso y directo en español.\n"
-			"La marca de tiempo al inicio de los mensajes indica la fecha y hora local actual del usuario (Europe/Madrid). A partir de ella calcula directamente días como hoy, mañana o ayer sin pedir confirmación de fechas.\n"
-			"Dispones de herramientas nativas (como `search_web`) para consultar datos en tiempo real (meteorología, noticias o datos recientes). Úsalas directamente cuando te consulten sobre el tiempo o información actualizada.\n"
-			"Dispones también de sub-agentes especializados (`delegate_to_researcher`, `delegate_to_coder`, `delegate_to_writer`) para delegar tareas complejas de análisis técnico/investigación, programación/arquitectura o redacción ejecutiva.\n"
-			"NUNCA repitas marcas de tiempo ni encabezados entre corchetes en tus respuestas. Responde con naturalidad, precisión y brevedad."
-		),
-		"researcher": (
-			"Eres un sub-agente especialista en investigación y análisis factual riguroso.\n"
-			"Tu cometido es sintetizar información técnica, científica o documental con máxima precisión.\n"
-			"Estructura tus hallazgos en puntos clave, resalta datos concretos y evita divagaciones."
-		),
-		"coder": (
-			"Eres un sub-agente ingeniero de software senior.\n"
-			"Tu cometido es generar código limpio, seguro, eficiente y bien estructurado (siguiendo principios SOLID/SRP).\n"
-			"Proporciona implementaciones funcionales y explicaciones concisas directamente enfocadas en la solución técnica."
-		),
-		"writer": (
-			"Eres un sub-agente especialista en redacción ejecutiva y comunicación clara.\n"
-			"Tu cometido es redactar correos, documentos, resúmenes o comunicados con un tono pulido, profesional y elocuente."
-		)
+		"main_agent": "Eres un asistente conversacional inteligente, conciso y directo en español.",
+		"researcher": "Eres un sub-agente especialista en investigación y análisis factual riguroso.",
+		"coder": "Eres un sub-agente ingeniero de software senior.",
+		"writer": "Eres un sub-agente especialista en redacción ejecutiva y comunicación clara."
 	}
 
 	search_dirs = [
@@ -56,12 +86,13 @@ def load_all_agent_prompts() -> Dict[str, str]:
 				filepath = os.path.join(prompts_dir, filename)
 				try:
 					with open(filepath, "r", encoding="utf-8") as f:
-						content = f.read().strip()
-						if content:
+						raw_content = f.read().strip()
+						if raw_content:
+							effective_content = _parse_and_get_effective_prompt(raw_content)
 							if stem in ("system_prompt", "main", "main_agent"):
-								prompts["main_agent"] = content
+								prompts["main_agent"] = effective_content
 							else:
-								prompts[stem] = content
+								prompts[stem] = effective_content
 				except Exception:
 					pass
 	return prompts

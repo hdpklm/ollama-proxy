@@ -45,6 +45,13 @@ async def handle_chat(req: ChatRequest):
 				messages.append(m)
 		messages = ensure_system_prompt(messages)
 
+		from services.agent_manager import load_agent_profile
+		from services.tool_definitions import get_tools_for_agent
+		main_profile = load_agent_profile("system_prompt")
+		profile_tools = get_tools_for_agent(main_profile)
+		target_temperature = req.temperature if req.temperature is not None else main_profile.temperature
+		call_tracker: dict[str, int] = {}
+
 		# Native OpenAI Tool Calling Loop (up to 3 steps)
 		selected_model = req.model or settings.LLM_MODEL or "gemma4:e2b"
 		executed_tools = []
@@ -55,11 +62,11 @@ async def handle_chat(req: ChatRequest):
 			res = await llm_service.chat(
 				messages,
 				model=selected_model,
-				tools=NATIVE_TOOLS if step == 0 else None,
+				tools=profile_tools if (step == 0 and profile_tools) else None,
 				priority=bool(req.priority),
 				fast=bool(req.fast if req.fast is not None else True),
 				max_tokens=req.max_tokens,
-				temperature=req.temperature,
+				temperature=target_temperature,
 			)
 			adapter = get_adapter(selected_model)
 			msg = res.get("message", {})
@@ -75,7 +82,12 @@ async def handle_chat(req: ChatRequest):
 					print(f"[REST Chat] Tool call detected ({adapter.name}): {tc.name} args={tc.args}")
 					if not settings.HIDE_BACKGROUND:
 						debug_events.append({"stage": "tool_calling", "tool": tc.name, "args": tc.args, "step": step})
-					tool_result = await execute_tool(tc.name, tc.args)
+					tool_result = await execute_tool(
+						tc.name,
+						tc.args,
+						caller_profile=main_profile,
+						call_tracker=call_tracker
+					)
 					executed_tools.append({"tool": tc.name, "args": tc.args})
 					if not settings.HIDE_BACKGROUND:
 						debug_events.append({"stage": "tool_result", "tool": tc.name, "result": tool_result})

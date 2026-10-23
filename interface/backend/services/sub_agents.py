@@ -24,7 +24,17 @@ class SubAgent:
 
 		model_info = await llm_service.get_model_info(self.model)
 
-		prompt = load_prompt(self.key, fallback=self.system_prompt)
+		from services.agent_manager import load_agent_profile
+		from services.tool_definitions import get_tools_for_agent
+		from services.adapters import get_adapter
+		from services.tool_executor import execute_tool
+
+		profile = load_agent_profile(self.key)
+		prompt = profile.get_effective_prompt() or self.system_prompt
+		sub_agent_tools = get_tools_for_agent(profile)
+		target_temperature = profile.temperature if profile.temperature is not None else self.temperature
+		adapter = get_adapter(self.model)
+
 		messages = [{"role": "system", "content": prompt}]
 		if context:
 			messages.append({"role": "user", "content": f"Contexto previo:\n{context}\n\nTarea a resolver:\n{task}"})
@@ -33,17 +43,49 @@ class SubAgent:
 
 		res: Dict[str, Any] = {}
 		restore_info: Dict[str, Any] = {}
+		call_tracker: Dict[str, int] = {}
+		executed_tools = []
+
 		try:
-			res = await llm_service.chat(
-				messages=messages,
-				model=self.model,
-				temperature=self.temperature,
-				priority=False,
-				fast=True
-			)
+			# Autonomous sub-agent tool execution loop (up to 3 steps)
+			for step in range(3):
+				active_tools = sub_agent_tools if (step == 0 and sub_agent_tools) else None
+				res = await llm_service.chat(
+					messages=messages,
+					model=self.model,
+					tools=active_tools,
+					temperature=target_temperature,
+					priority=False,
+					fast=True
+				)
+				msg = res.get("message", {})
+				tool_calls = adapter.extract_tool_calls(
+					native_tool_calls=msg.get("tool_calls"),
+					text_content=msg.get("content")
+				)
+
+				if tool_calls:
+					if msg.get("tool_calls"):
+						messages.append(msg)
+					for tc in tool_calls:
+						tool_result = await execute_tool(
+							tc.name,
+							tc.args,
+							on_metric=on_metric,
+							caller_profile=profile,
+							call_tracker=call_tracker
+						)
+						executed_tools.append({"tool": tc.name, "args": tc.args})
+						messages.extend(adapter.format_tool_response(tc, tool_result))
+					continue
+
+				# Content generated without further tool calls
+				content = msg.get("content") or res.get("response") or ""
+				if not content:
+					return f"[{self.name}] No se obtuvo respuesta del sub-agente."
+				return f"[{self.name}]:\n{content}"
+
 			content = res.get("message", {}).get("content") or res.get("response") or ""
-			if not content:
-				return f"[{self.name}] No se obtuvo respuesta del sub-agente."
 			return f"[{self.name}]:\n{content}"
 		except Exception as e:
 			return f"[{self.name}] Error de ejecución: {str(e)}"

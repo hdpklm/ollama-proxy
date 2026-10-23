@@ -75,7 +75,13 @@ for _agent_key in SUB_AGENTS.keys():
 		lambda k: (lambda args, on_m=None: _delegate_sub_agent(k, args, on_metric=on_m))
 	)(_agent_key)
 
-async def execute_tool(name: str, arguments: Dict[str, Any] | str | None, on_metric: Any = None) -> str:
+async def execute_tool(
+	name: str,
+	arguments: Dict[str, Any] | str | None,
+	on_metric: Any = None,
+	caller_profile: Any = None,
+	call_tracker: Dict[str, int] | None = None
+) -> str:
 	if isinstance(arguments, str):
 		try:
 			arguments = json.loads(arguments)
@@ -84,15 +90,36 @@ async def execute_tool(name: str, arguments: Dict[str, Any] | str | None, on_met
 	elif not isinstance(arguments, dict):
 		arguments = {}
 
+	# Guardrails & call limit enforcement per agent profile
+	if caller_profile is not None:
+		from services.agent_manager import AgentProfile, load_agent_profile
+		if not isinstance(caller_profile, AgentProfile):
+			caller_profile = load_agent_profile(str(caller_profile))
+
+		current_count = call_tracker.get(name, 0) if call_tracker is not None else 0
+		can_run, reason = caller_profile.can_execute_tool(name, current_count)
+		if not can_run:
+			print(f"[ToolExecutor] Guardrail blocked '{name}' for '{caller_profile.name}': {reason}")
+			return f"Error: {reason}"
+
 	handler = TOOL_REGISTRY.get(name)
 	if not handler and name.startswith("delegate_to_"):
 		sub_agent_key = name[len("delegate_to_"):]
 		if sub_agent_key in SUB_AGENTS:
-			return await _delegate_sub_agent(sub_agent_key, arguments, on_metric=on_metric)
+			res = await _delegate_sub_agent(sub_agent_key, arguments, on_metric=on_metric)
+			if call_tracker is not None:
+				call_tracker[name] = call_tracker.get(name, 0) + 1
+			return res
 
 	if not handler:
 		return f"Error: Herramienta desconocida '{name}'."
 
 	if name.startswith("delegate_to_"):
-		return await handler(arguments, on_m=on_metric)
-	return await handler(arguments)
+		res = await handler(arguments, on_m=on_metric)
+	else:
+		res = await handler(arguments)
+
+	if call_tracker is not None:
+		call_tracker[name] = call_tracker.get(name, 0) + 1
+
+	return res

@@ -1091,3 +1091,17 @@
 	- `backend/prompt_cache.py`: Se implementó `load_all_agent_prompts()` para descubrir e indexar automáticamente todos los archivos de prompt existentes en `prompts/` y pre-calentar sus cachés KV en RAM.
 	- `docker-compose.yml`: Se añadió el montaje de volumen `./prompts:/app/prompts:ro` tanto en el servicio `ollama-proxy` como en `interface`.
 	- Se desplegaron los cambios en la Raspberry Pi 5 y se verificó la recarga en caliente de los prompts y su pre-calentamiento en RAM.
+
+### 📝 Registro: [v0.9.16] - Sistema PRO de asignación de herramientas, directivas contextuales y guardrails vía YAML Frontmatter
+- **date-time**: 2026-10-23 02:16:30
+- **Problema**:
+	- No existía una forma modular y declarativa en `prompts/` para asignar herramientas específicas a cada sub-agente y al agente principal, contextualizar su propósito para cada rol o restringir su uso para evitar abusos y bucles infinitos.
+- **Causa**:
+	- Las herramientas estaban agrupadas en un esquema estático global (`NATIVE_TOOLS`) asignado por defecto únicamente al agente principal, mientras que los sub-agentes no disponían de un bucle autónomo para ejecutar herramientas autorizadas.
+- **Solución**:
+	- **YAML Frontmatter en Markdown**: Se estandarizó la cabecera YAML en cada archivo de `prompts/*.md` (`system_prompt.md`, `researcher.md`, `coder.md`, `writer.md`) definiendo `name`, `role`, `temperature`, `tools`, `max_calls`, `purpose` y `rules`.
+	- **Módulo `AgentProfile` y `AgentManager`**: Creado [`interface/backend/services/agent_manager.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/services/agent_manager.py) para parsear el frontmatter, filtrar esquemas de herramientas y generar el prompt efectivo con directivas contextuales inyectadas.
+	- **Guardrails en `ToolExecutor`**: [`interface/backend/services/tool_executor.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/services/tool_executor.py) ahora valida autorización por rol y bloquea con error pedagógico si se excede el límite de llamadas fijado en el frontmatter (`can_execute_tool`).
+	- **Bucle autónomo en Sub-Agentes**: [`interface/backend/services/sub_agents.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/services/sub_agents.py) ahora ejecuta hasta 3 pasos de tool-calling si el sub-agente invoca herramientas autorizadas (ej. `researcher` buscando y leyendo URLs).
+	- **Sincronización de PromptCache**: [`backend/prompt_cache.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/backend/prompt_cache.py) procesa el frontmatter e indexa exactamente los mismos prompts efectivos para pre-calentamiento KV en memoria RAM.
+	- Se añadieron tests exhaustivos en `LLM_Test/gemini/tests/test_agent_tools.py` y se desplegó y validó en la Raspberry Pi 5.

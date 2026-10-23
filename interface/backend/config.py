@@ -40,6 +40,15 @@ def get_prompts_dir() -> str:
 	return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "prompts"))
 
 def load_prompt(name: str, fallback: str = "") -> str:
+	try:
+		from services.agent_manager import load_agent_profile
+		profile = load_agent_profile(name)
+		effective = profile.get_effective_prompt()
+		if effective:
+			return effective
+	except Exception:
+		pass
+
 	prompts_dir = get_prompts_dir()
 	file_candidates = [
 		os.path.join(prompts_dir, f"{name}.md"),

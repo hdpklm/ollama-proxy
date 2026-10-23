@@ -510,6 +510,13 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 	await websocket.accept()
 	current_stream_task: asyncio.Task | None = None
 	async def stream_tokens(messages: list, model: str, tts_mode: str = "rpi5", priority: bool = False, fast: bool = True, turn_id: str = ""):
+		from services.agent_manager import load_agent_profile
+		from services.tool_definitions import get_tools_for_agent
+
+		main_profile = load_agent_profile("system_prompt")
+		profile_tools = get_tools_for_agent(main_profile)
+		call_tracker: dict[str, int] = {}
+
 		adapter = get_adapter(model)
 		max_tool_steps = 3
 		last_usage = None
@@ -554,7 +561,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 			is_thinking_block = False
 
 			try:
-				async for chunk in llm_service.stream_chat(messages, model=model, tools=NATIVE_TOOLS if step == 0 else None, priority=priority, fast=fast):
+				async for chunk in llm_service.stream_chat(messages, model=model, tools=profile_tools if (step == 0 and profile_tools) else None, priority=priority, fast=fast):
 					if isinstance(chunk, dict):
 						if "tool_calls" in chunk:
 							accumulated_tool_calls.extend(chunk["tool_calls"])
@@ -636,7 +643,13 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 								**sub_m
 							})
 
-						tool_result = await execute_tool(tc.name, tc.args, on_metric=on_subagent_metric)
+						tool_result = await execute_tool(
+							tc.name,
+							tc.args,
+							on_metric=on_subagent_metric,
+							caller_profile=main_profile,
+							call_tracker=call_tracker
+						)
 						tool_duration = round(time.time() - t_tool_start, 3)
 						result_tokens = await llm_service.count_tokens(str(tool_result))
 						total_tool_tokens = call_tokens + result_tokens
