@@ -1167,3 +1167,14 @@
 		- Se fijó la altura del diálogo modal de forma determinista con `h-[90vh] sm:h-[90dvh]` y se agregó `h-full min-h-0` al contenedor dividido (`flex-col md:flex-row`).
 		- Se eliminó `overscroll-contain` de `<main>` y de todos los bloques internos (`<pre>` y `<div>` de RAG, 10 mensajes, system prompt y ejecuciones de herramientas), permitiendo que el desplazamiento con rueda fluya con total naturalidad sin atrapar el cursor.
 		- Se ajustaron las alturas máximas de los bloques a `max-h-96 overflow-y-auto` con soporte de `break-words whitespace-pre-wrap` y scrollbar estilizado para una lectura cómoda y sin cortes.
+
+### 📝 Registro: [v0.9.23] - Enrutamiento de Logs de Conversaciones a Raíz del Proyecto y Mapeo en Docker
+- **date-time**: 2026-10-23 05:33:00
+- **Problema**:
+	- Los logs de auditoría de conversaciones y razonamiento no aparecían en la carpeta física de la raíz del proyecto (`logs/conversations`) al ejecutarse dentro del contenedor Docker en la Raspberry Pi 5 ni en entornos locales.
+- **Causa**:
+	- En `interface/backend/services/conversation_logger.py`, la ruta por defecto resolvía dos niveles arriba (`interface/logs/conversations`) en lugar de la raíz del repositorio (`logs/conversations`).
+	- En `docker-compose.yml`, el servicio `interface` no tenía un volumen montado para `./logs`, por lo que el contenedor escribía los archivos en su capa efímera interna sin persistirlos en el disco del host.
+- **Solución**:
+	- Se modificó `interface/backend/services/conversation_logger.py` para resolver dinámicamente la raíz del proyecto (`./logs/conversations`) comprobando la existencia de `docker-compose.yml` / `project_status.md` a 3 niveles, `/app/logs/conversations` en contenedores, o la variable `CONVERSATION_LOGS_DIR`.
+	- Se añadió el volumen `- ./logs:/app/logs` en `docker-compose.yml` dentro del servicio `interface`, garantizando que todas las sesiones y archivos Markdown de auditoría generados por el LLM se sincronicen directamente en la raíz física del host.

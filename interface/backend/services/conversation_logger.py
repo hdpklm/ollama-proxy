@@ -11,10 +11,22 @@ class ConversationLogger:
 		if base_dir:
 			self.base_dir = os.path.abspath(base_dir)
 		else:
-			# Default to project root /logs/conversations
-			self.base_dir = os.path.abspath(
-				os.path.join(os.path.dirname(__file__), "..", "..", "logs", "conversations")
-			)
+			env_path = os.environ.get("CONVERSATION_LOGS_DIR") or os.environ.get("LOGS_DIR")
+			if env_path:
+				self.base_dir = os.path.abspath(env_path)
+			else:
+				# Project root is 3 levels up from interface/backend/services
+				repo_root = os.path.abspath(
+					os.path.join(os.path.dirname(__file__), "..", "..", "..")
+				)
+				if os.path.exists(os.path.join(repo_root, "docker-compose.yml")) or os.path.exists(os.path.join(repo_root, "project_status.md")):
+					self.base_dir = os.path.join(repo_root, "logs", "conversations")
+				elif os.path.isdir("/app"):
+					self.base_dir = "/app/logs/conversations"
+				else:
+					self.base_dir = os.path.abspath(
+						os.path.join(os.path.dirname(__file__), "..", "..", "logs", "conversations")
+					)
 		os.makedirs(self.base_dir, exist_ok=True)
 		self._session_paths: dict[str, str] = {}
 		self._session_indices: dict[str, int] = {}
