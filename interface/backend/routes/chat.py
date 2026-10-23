@@ -16,7 +16,7 @@ from services.adapters import get_adapter
 from config import ensure_system_prompt, settings, load_default_system_prompt
 from services.tree_context_manager import TreeContextManager
 from services.plan_and_solve import is_complex_request, PlanAndSolveOrchestrator
-from services.conversation_logger import conversation_logger
+from services.conversation_logger import conversation_logger, set_active_session
 
 tree_context_manager = TreeContextManager()
 
@@ -28,6 +28,7 @@ class ChatRequest(BaseModel):
 	max_tokens: int | None = None
 	temperature: float | None = None
 	branch_id: str | None = "main"
+	session_id: str | None = None
 
 class TTSRequest(BaseModel):
 	text: str
@@ -40,6 +41,8 @@ import json
 async def handle_chat(req: ChatRequest):
 	try:
 		branch_id = req.branch_id or "main"
+		target_session_id = req.session_id or branch_id
+		set_active_session(target_session_id)
 		clean_user_text = ""
 		for m in reversed(req.messages):
 			if m.get("role") == "user":
@@ -69,7 +72,7 @@ async def handle_chat(req: ChatRequest):
 				s_res = s.get("result", "")
 				try:
 					conversation_logger.log_plan_step(
-						session_id=branch_id,
+						session_id=target_session_id,
 						step_id=s_id,
 						description=s_desc,
 						context_given="",
@@ -89,7 +92,7 @@ async def handle_chat(req: ChatRequest):
 			active_rag = await tree_context_manager.project_context(branch_id, clean_user_text)
 			try:
 				conversation_logger.log_user_turn(
-					session_id=branch_id,
+					session_id=target_session_id,
 					title=clean_user_text,
 					system_prompt=load_default_system_prompt(),
 					tree_rag_context=active_rag,
@@ -181,7 +184,7 @@ async def handle_chat(req: ChatRequest):
 					executed_tools.append({"tool": tc.name, "args": tc.args})
 					try:
 						conversation_logger.log_tool_call(
-							session_id=branch_id,
+							session_id=target_session_id,
 							tool_name=tc.name,
 							args=tc.args,
 							result=tool_result
@@ -203,7 +206,7 @@ async def handle_chat(req: ChatRequest):
 						branch = await tree_context_manager.get_or_create_branch(branch_id)
 						active_rag = await tree_context_manager.project_context(branch_id, clean_user_text)
 						conversation_logger.log_user_turn(
-							session_id=branch_id,
+							session_id=target_session_id,
 							title=clean_user_text,
 							system_prompt=load_default_system_prompt(),
 							tree_rag_context=active_rag,
@@ -227,7 +230,7 @@ async def handle_chat(req: ChatRequest):
 					branch = await tree_context_manager.get_or_create_branch(branch_id)
 					active_rag = await tree_context_manager.project_context(branch_id, clean_user_text)
 					conversation_logger.log_user_turn(
-						session_id=branch_id,
+						session_id=target_session_id,
 						title=clean_user_text,
 						system_prompt=load_default_system_prompt(),
 						tree_rag_context=active_rag,

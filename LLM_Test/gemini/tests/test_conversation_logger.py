@@ -151,5 +151,82 @@ class TestConversationLogger(unittest.TestCase):
 		content = self.logger.get_file_content(sess_dir, user_file)
 		self.assertIn("category: user_turn", content)
 
+	def test_multiple_turns_in_same_session_keep_single_folder_and_increment_index(self):
+		sess_id = "chat_20261023_abc123"
+
+		# Turn 1: User message
+		p1 = self.logger.log_user_turn(
+			session_id=sess_id,
+			title="¿Qué tiempo hace en Madrid?",
+			system_prompt="sys",
+			tree_rag_context="",
+			last_10_messages=[],
+			user_message="¿Qué tiempo hace en Madrid?",
+			final_response="Voy a consultar la previsión."
+		)
+		self.assertTrue(p1.endswith("001-user.md"))
+
+		# Turn 1: Tool call
+		p2 = self.logger.log_tool_call(
+			session_id=sess_id,
+			tool_name="get_weather",
+			args={"city": "Madrid"},
+			result="22°C Soleado"
+		)
+		self.assertTrue(p2.endswith("002-tool-get_weather.md"))
+
+		# Turn 1: Sub-agent
+		p3 = self.logger.log_agent_turn(
+			session_id=sess_id,
+			agent_name="researcher",
+			prompt="Analiza el clima",
+			response="Día primaveral templado."
+		)
+		self.assertTrue(p3.endswith("003-agent-researcher.md"))
+
+		# Turn 2: User continues the conversation with a new message
+		p4 = self.logger.log_user_turn(
+			session_id=sess_id,
+			title="¿Y lloverá mañana?",
+			system_prompt="sys",
+			tree_rag_context="",
+			last_10_messages=[],
+			user_message="¿Y lloverá mañana?",
+			final_response="No hay probabilidad de lluvia mañana."
+		)
+		self.assertTrue(p4.endswith("004-user.md"))
+
+		# Simulate server/container restart with new logger instance on same directory
+		restarted_logger = ConversationLogger(base_dir=self.temp_dir)
+
+		# Turn 3: User continues after restart
+		p5 = restarted_logger.log_user_turn(
+			session_id=sess_id,
+			title="Gracias, ¿y el viento?",
+			system_prompt="sys",
+			tree_rag_context="",
+			last_10_messages=[],
+			user_message="Gracias, ¿y el viento?",
+			final_response="Viento suave de 10 km/h."
+		)
+		self.assertTrue(p5.endswith("005-user.md"))
+
+		# Verify all 5 files are in the exact SAME single conversation directory
+		convs = restarted_logger.list_conversations()
+		self.assertEqual(len(convs), 1, "There must be only 1 conversation folder for the entire chat session")
+
+		sess_dir = convs[0]["session_dir"]
+		files = restarted_logger.get_conversation_files(sess_dir)
+		self.assertEqual(len(files), 5, "All 5 interaction files must be preserved inside the same folder")
+
+		file_names = [f["filename"] for f in files]
+		self.assertEqual(file_names, [
+			"001-user.md",
+			"002-tool-get_weather.md",
+			"003-agent-researcher.md",
+			"004-user.md",
+			"005-user.md"
+		])
+
 if __name__ == "__main__":
 	unittest.main()

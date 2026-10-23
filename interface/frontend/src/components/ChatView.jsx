@@ -1,7 +1,14 @@
 import React, { useState, useRef, useEffect } from "react"
-import { Send, Mic, Square, Play, Pause, Loader2, Bot, User, Volume2, VolumeX, Activity, Wrench, ChevronDown, ChevronUp, Cpu, Terminal, Clock, Database, Zap, Layers, CheckCircle2 } from "lucide-react"
+import { Send, Mic, Square, Play, Pause, Loader2, Bot, User, Volume2, VolumeX, Activity, Wrench, ChevronDown, ChevronUp, Cpu, Terminal, Clock, Database, Zap, Layers, CheckCircle2, PlusCircle } from "lucide-react"
 
 export default function ChatView({ settings = { useBrowserTTS: false, useBrowserSTT: false } }) {
+	const [chatSessionId, setChatSessionId] = useState(() => {
+		const saved = typeof window !== "undefined" ? sessionStorage.getItem("current_chat_session_id") : null
+		if (saved) return saved
+		const newId = "chat_" + Date.now().toString() + "_" + Math.random().toString(36).substring(2, 7)
+		if (typeof window !== "undefined") sessionStorage.setItem("current_chat_session_id", newId)
+		return newId
+	})
 	const [messages, setMessages] = useState([
 		{
 			role: "assistant",
@@ -15,6 +22,19 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	const [audioLoadingIndex, setAudioLoadingIndex] = useState(null)
 	const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false)
 	const [openMetricsIndices, setOpenMetricsIndices] = useState({})
+
+	const handleNewChat = () => {
+		stopStreamingAudio()
+		const newId = "chat_" + Date.now().toString() + "_" + Math.random().toString(36).substring(2, 7)
+		if (typeof window !== "undefined") sessionStorage.setItem("current_chat_session_id", newId)
+		setChatSessionId(newId)
+		setMessages([
+			{
+				role: "assistant",
+				content: "Hola, ¿en qué puedo ayudarte hoy?"
+			}
+		])
+	}
 
 	const toggleMetrics = (index) => {
 		setOpenMetricsIndices((prev) => ({
@@ -157,7 +177,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 			const res = await fetch("/api/chat", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ messages: history })
+				body: JSON.stringify({ messages: history, session_id: chatSessionId })
 			})
 			if (!res.ok) throw new Error("Failed to contact LLM")
 			const data = await res.json()
@@ -346,6 +366,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 			ws.onopen = () => {
 				ws.send(JSON.stringify({
 					turn_id: turnId,
+					session_id: chatSessionId,
 					messages: newHistory,
 					tts_mode: settings.useBrowserTTS ? "browser" : "rpi5"
 				}))
@@ -676,6 +697,21 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 
 	return (
 		<div className="flex flex-col h-full max-w-3xl mx-auto px-3 sm:px-4 py-2.5 sm:py-4 min-h-0 overflow-hidden">
+			{/* Chat Session Bar */}
+			<div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/60 flex-shrink-0">
+				<span className="text-[11px] text-slate-500 font-mono truncate">
+					ID: {chatSessionId.length > 20 ? chatSessionId.substring(0, 18) + "..." : chatSessionId}
+				</span>
+				<button
+					onClick={handleNewChat}
+					className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 transition-colors"
+					title="Iniciar nueva conversación limpia"
+				>
+					<PlusCircle className="w-3.5 h-3.5 text-sky-400" />
+					<span>Nuevo chat</span>
+				</button>
+			</div>
+
 			{/* Messages Container */}
 			<div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
 				{messages.map((msg, index) => (

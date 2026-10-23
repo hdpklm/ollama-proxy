@@ -516,7 +516,7 @@ async def websocket_chat_metrics_endpoint(websocket: WebSocket):
 async def websocket_chat_endpoint(websocket: WebSocket):
 	await websocket.accept()
 	current_stream_task: asyncio.Task | None = None
-	async def stream_tokens(messages: list, model: str, tts_mode: str = "rpi5", priority: bool = False, fast: bool = True, turn_id: str = "", branch_id: str = "main", user_prompt_clean: str = ""):
+	async def stream_tokens(messages: list, model: str, tts_mode: str = "rpi5", priority: bool = False, fast: bool = True, turn_id: str = "", branch_id: str = "main", user_prompt_clean: str = "", session_id: str = "main"):
 		from services.agent_manager import load_agent_profile
 		from services.tool_definitions import get_tools_for_agent
 
@@ -675,7 +675,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 						executed_tools.append(tool_info)
 						try:
 							conversation_logger.log_tool_call(
-								session_id=branch_id,
+								session_id=session_id,
 								tool_name=tc.name,
 								args=tc.args,
 								result=tool_result,
@@ -754,7 +754,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 						branch = await tree_context_manager.get_or_create_branch(branch_id)
 						active_rag = await tree_context_manager.project_context(branch_id, user_prompt_clean)
 						conversation_logger.log_user_turn(
-							session_id=branch_id,
+							session_id=session_id,
 							title=user_prompt_clean,
 							system_prompt=load_default_system_prompt(),
 							tree_rag_context=active_rag,
@@ -784,7 +784,10 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 		while True:
 			data = await websocket.receive_json()
 			msg_type = data.get("type", "chat")
-			branch_id = data.get("branch_id", "main")
+			branch_id = data.get("branch_id") or data.get("session_id") or "main"
+			session_id = data.get("session_id") or branch_id
+			from services.conversation_logger import set_active_session
+			set_active_session(session_id)
 
 			if msg_type == "fork_branch":
 				source_id = data.get("source_branch_id", "main")
@@ -850,7 +853,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 									s_res = s.get("result", "")
 									try:
 										conversation_logger.log_plan_step(
-											session_id=branch_id,
+											session_id=session_id,
 											step_id=s_id,
 											description=s_desc,
 											context_given="",
@@ -870,7 +873,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 								active_rag = await tree_context_manager.project_context(branch_id, clean_user_text)
 								try:
 									conversation_logger.log_user_turn(
-										session_id=branch_id,
+										session_id=session_id,
 										title=clean_user_text,
 										system_prompt=load_default_system_prompt(),
 										tree_rag_context=active_rag,
@@ -935,7 +938,8 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 							fast=fast,
 							turn_id=turn_id,
 							branch_id=branch_id,
-							user_prompt_clean=clean_user_text
+							user_prompt_clean=clean_user_text,
+							session_id=session_id
 						)
 					)
 			elif msg_type == "stop":

@@ -1178,3 +1178,29 @@
 - **Solución**:
 	- Se modificó `interface/backend/services/conversation_logger.py` para resolver dinámicamente la raíz del proyecto (`./logs/conversations`) comprobando la existencia de `docker-compose.yml` / `project_status.md` a 3 niveles, `/app/logs/conversations` en contenedores, o la variable `CONVERSATION_LOGS_DIR`.
 	- Se añadió el volumen `- ./logs:/app/logs` en `docker-compose.yml` dentro del servicio `interface`, garantizando que todas las sesiones y archivos Markdown de auditoría generados por el LLM se sincronicen directamente en la raíz física del host.
+
+### 📝 Registro: [v0.9.24] - Recreación de Contenedor Interface en RPi5 y Persistencia de Logs en Host
+- **date-time**: 2026-10-23 05:58:00
+- **Problema**:
+	- Tras ejecutar `git pull && docker compose restart` en la Raspberry Pi 5, las carpetas de logs de conversaciones seguían sin generarse en el host (`/docker/repos/ollama-proxy/logs`), manteniéndose exclusivamente dentro del contenedor.
+- **Causa**:
+	- `docker compose restart` únicamente reinicia los procesos en contenedores ya instanciados; no reconstruye ni actualiza la definición de montajes de volúmenes de `docker-compose.yml`. El contenedor `interface` seguía corriendo con la configuración creada horas atrás sin el bind mount `- ./logs:/app/logs`.
+	- Al intentar recrear el contenedor mediante `docker compose up -d interface`, el comando fallaba con `No such image: interface:linux` debido a que la variable `IMAGE_TAG` no estaba definida en el `.env` de la RPi5, intentando descargar la imagen x86 (`:linux`) en vez de la ARM64 local (`:RPi5`).
+- **Solución**:
+	- Se rescataron todas las sesiones de logs existentes desde el interior del contenedor hacia el host físico (`docker cp interface:/app/logs .`).
+	- Se fijó `IMAGE_TAG=RPi5` en `/docker/repos/ollama-proxy/.env` en la Raspberry Pi 5.
+	- Se recreó el contenedor con `docker compose up -d interface`, activando el bind mount `{"Source":"/docker/repos/ollama-proxy/logs","Destination":"/app/logs"}`.
+	- Se comprobó el acceso de lectura y escritura bidireccional entre contenedor y host, y se validó que la API `/api/logs/conversations` sirve correctamente las 4 sesiones existentes.
+
+### 📝 Registro: [v0.9.25] - Persistencia de sesión única por chat e indexación incremental sin colisión
+- **date-time**: 2026-10-23 10:10:00
+- **Problema**:
+	- Al escribir mensajes adicionales dentro del mismo chat, el sistema generaba una carpeta nueva cada vez ({yyyy-mm-dd--hh-mm}-{slug}) en lugar de conservar todos los turnos, llamadas a tools y sub-agentes en la misma carpeta del chat, provocando dispersión de logs y riesgo de pérdida de contexto cronológico.
+- **Causa**:
+	- ChatView.jsx no conservaba ni transmitía un identificador de sesión (session_id) al WebSocket (/ws/chat) ni al endpoint REST (/api/chat).
+	- En el backend, el mapeo de carpetas de sesión solo existía en memoria volátil de proceso y no se recuperaba tras reinicio o recarga, además de que sub_agents.py hardcodeaba session_id="sub_agents" aislándose de la conversación madre.
+- **Solución**:
+	- Se añadió en conversation_logger.py persistencia bidireccional de sesiones en disco (.sessions_map.json y .session_meta.json por carpeta) con auto-recuperación ante reinicios y cálculo dinámico del siguiente índice (_get_highest_index(folder_path) + 1), garantizando que cada archivo (001-user.md, 002-tool-*.md, etc.) tenga numeración estrictamente creciente sin colisiones.
+	- Se actualizó interface/backend/routes/chat.py para admitir session_id en ChatRequest y propagar la sesión activa mediante set_active_session.
+	- En interface/frontend/src/components/ChatView.jsx, se implementó persistencia de chatSessionId vía sessionStorage, inclusión de session_id en los payloads de WebSocket y fallback REST, y botón de "Nuevo chat" para reiniciar limpiamente la sesión cuando el usuario lo desee.
+	- Se crearon pruebas unitarias exhaustivas en LLM_Test/gemini/tests/test_conversation_logger.py validando la persistencia en una única carpeta tras múltiples turnos de usuario, tools, sub-agentes y reinicio simulado del backend.

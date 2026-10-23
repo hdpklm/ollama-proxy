@@ -5,6 +5,16 @@ import time
 from datetime import datetime
 from typing import Optional, Any
 from zoneinfo import ZoneInfo
+from contextvars import ContextVar
+
+active_session_var: ContextVar[str] = ContextVar("active_session_var", default="main")
+
+def set_active_session(session_id: str) -> None:
+	if session_id:
+		active_session_var.set(str(session_id))
+
+def get_active_session() -> str:
+	return active_session_var.get()
 
 class ConversationLogger:
 	def __init__(self, base_dir: Optional[str] = None):
@@ -28,8 +38,50 @@ class ConversationLogger:
 						os.path.join(os.path.dirname(__file__), "..", "..", "logs", "conversations")
 					)
 		os.makedirs(self.base_dir, exist_ok=True)
-		self._session_paths: dict[str, str] = {}
+		self._map_file = os.path.join(self.base_dir, ".sessions_map.json")
+		self._session_paths: dict[str, str] = self._load_sessions_map()
 		self._session_indices: dict[str, int] = {}
+
+	def _load_sessions_map(self) -> dict[str, str]:
+		mapping = {}
+		if os.path.isfile(self._map_file):
+			try:
+				with open(self._map_file, "r", encoding="utf-8") as f:
+					data = json.load(f)
+					for s_id, path in data.items():
+						if os.path.isdir(path):
+							mapping[s_id] = path
+			except Exception:
+				pass
+
+		# Also scan directory folders for .session_meta.json
+		try:
+			if os.path.isdir(self.base_dir):
+				for entry in os.listdir(self.base_dir):
+					if entry.startswith("."):
+						continue
+					full_p = os.path.join(self.base_dir, entry)
+					if os.path.isdir(full_p):
+						meta_p = os.path.join(full_p, ".session_meta.json")
+						if os.path.isfile(meta_p):
+							try:
+								with open(meta_p, "r", encoding="utf-8") as mf:
+									meta = json.load(mf)
+									sid = meta.get("session_id")
+									if sid and sid not in mapping:
+										mapping[sid] = full_p
+							except Exception:
+								pass
+		except Exception:
+			pass
+		return mapping
+
+	def _save_sessions_map(self) -> None:
+		try:
+			with open(self._map_file, "w", encoding="utf-8") as f:
+				json.dump(self._session_paths, f, indent=2, ensure_ascii=False)
+		except Exception:
+			pass
 
 	def _slugify(self, text: str, max_words: int = 4) -> str:
 		clean = re.sub(r"[^\w\s-]", "", text.strip().lower())
@@ -38,17 +90,36 @@ class ConversationLogger:
 		return slug if slug else "chat"
 
 	def get_or_create_session_dir(self, session_id: str, title: str = "") -> str:
-		if session_id in self._session_paths and os.path.isdir(self._session_paths[session_id]):
-			return self._session_paths[session_id]
+		clean_session = str(session_id or get_active_session() or "main")
 
-		# Format timestamp: YYYY-MM-DD--HH-mm
+		# 1. In-memory cache
+		if clean_session in self._session_paths and os.path.isdir(self._session_paths[clean_session]):
+			return self._session_paths[clean_session]
+
+		# 2. Check disk mapping file
+		self._session_paths = self._load_sessions_map()
+		if clean_session in self._session_paths and os.path.isdir(self._session_paths[clean_session]):
+			return self._session_paths[clean_session]
+
+		# 3. If session is generic "main" and a session folder exists, reuse the most recent one
+		if clean_session == "main":
+			existing = self.list_conversations()
+			if existing:
+				most_recent = existing[0].get("session_dir")
+				most_recent_path = os.path.join(self.base_dir, most_recent)
+				if os.path.isdir(most_recent_path):
+					self._session_paths[clean_session] = most_recent_path
+					self._save_sessions_map()
+					return most_recent_path
+
+		# 4. Create new folder for this conversation
 		try:
 			now = datetime.now(ZoneInfo("Europe/Madrid"))
 		except Exception:
 			now = datetime.now()
 
 		timestamp_str = now.strftime("%Y-%m-%d--%H-%M")
-		slug_title = self._slugify(title or session_id)
+		slug_title = self._slugify(title or clean_session)
 		folder_name = f"{timestamp_str}-{slug_title}"
 		full_path = os.path.join(self.base_dir, folder_name)
 
@@ -60,8 +131,22 @@ class ConversationLogger:
 			counter += 1
 
 		os.makedirs(full_path, exist_ok=True)
-		self._session_paths[session_id] = full_path
-		self._session_indices[session_id] = self._get_highest_index(full_path)
+
+		# Persist .session_meta.json in directory
+		meta_file = os.path.join(full_path, ".session_meta.json")
+		try:
+			with open(meta_file, "w", encoding="utf-8") as mf:
+				json.dump({
+					"session_id": clean_session,
+					"title": title or clean_session,
+					"created_at": timestamp_str
+				}, mf, indent=2, ensure_ascii=False)
+		except Exception:
+			pass
+
+		self._session_paths[clean_session] = full_path
+		self._save_sessions_map()
+		self._session_indices[clean_session] = self._get_highest_index(full_path)
 		return full_path
 
 	def _get_highest_index(self, folder_path: str) -> int:
@@ -78,10 +163,10 @@ class ConversationLogger:
 		return highest
 
 	def _next_index(self, session_id: str, folder_path: str) -> int:
-		if session_id not in self._session_indices:
-			self._session_indices[session_id] = self._get_highest_index(folder_path)
-		self._session_indices[session_id] += 1
-		return self._session_indices[session_id]
+		highest = self._get_highest_index(folder_path)
+		next_idx = highest + 1
+		self._session_indices[session_id] = next_idx
+		return next_idx
 
 	def log_user_turn(
 		self,
@@ -301,7 +386,7 @@ class ConversationLogger:
 		conversations = []
 		for entry in sorted(os.listdir(self.base_dir), reverse=True):
 			folder_path = os.path.join(self.base_dir, entry)
-			if os.path.isdir(folder_path):
+			if os.path.isdir(folder_path) and not entry.startswith("."):
 				# Count files and preview title
 				files = [f for f in os.listdir(folder_path) if f.endswith(".md")]
 				conversations.append({

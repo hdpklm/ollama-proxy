@@ -83,9 +83,10 @@ class SubAgent:
 				content = msg.get("content") or res.get("response") or ""
 				final_output = f"[{self.name}]:\n{content}" if content else f"[{self.name}] No se obtuvo respuesta del sub-agente."
 				try:
-					from services.conversation_logger import conversation_logger
+					from services.conversation_logger import conversation_logger, get_active_session
+					target_session = get_active_session()
 					conversation_logger.log_agent_turn(
-						session_id="sub_agents",
+						session_id=target_session,
 						agent_name=self.key,
 						prompt=prompt,
 						response=final_output,
@@ -100,9 +101,10 @@ class SubAgent:
 			content = res.get("message", {}).get("content") or res.get("response") or ""
 			final_output = f"[{self.name}]:\n{content}"
 			try:
-				from services.conversation_logger import conversation_logger
+				from services.conversation_logger import conversation_logger, get_active_session
+				target_session = get_active_session()
 				conversation_logger.log_agent_turn(
-					session_id="sub_agents",
+					session_id=target_session,
 					agent_name=self.key,
 					prompt=prompt,
 					response=final_output,
