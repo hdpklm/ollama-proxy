@@ -1132,3 +1132,15 @@
 	- Creado `interface/backend/services/silence_killer.py`: Formateo en tiempo real de feedback al usuario (< 10 palabras) extrayendo directamente los argumentos de invocación de tools sin generar inferencias duplicadas ni coste de tokens.
 	- Creado `interface/backend/services/plan_and_solve.py`: Detector condicional de peticiones complejas, desglose estructurado en diccionario de tareas, ejecución aislada con contexto limpio por tarea en modo secuencial para RPi5 y síntesis exhaustiva que preserva todos los datos clave.
 	- Integrados los nuevos servicios en `routes/call_ws.py` (/ws/chat y /ws/call) y `routes/chat.py` (/api/chat).
+
+### 📝 Registro: [v0.9.19] - Auditoría y Persistencia de Logs en Markdown Categorizados para Inspección Web
+- **date-time**: 2026-10-23 04:55:00
+- **Problema**:
+	- Falta de trazabilidad y observabilidad del estado exacto de la memoria entregada al LLM (system prompt, árbol RAG y últimos 10 mensajes), sin registro individual indexado de invocaciones a tools ni ejecuciones de subagentes para consulta web.
+- **Causa**:
+	- Los logs anteriores eran efímeros en stdout/WebSocket o métricas agregadas de telemetría sin almacenamiento persistente ni visualización desglosada por sesión y archivo.
+- **Solución**:
+	- Creado `interface/backend/services/conversation_logger.py`: Motor de guardado estructurado en carpetas `{yyyy-mm-dd--hh-mm}-{nombre}` con archivos indexados `{index:03d}-{tipo}.md` y frontmatter YAML categorizado (`user_turn`, `tool_call`, `agent_execution`, `plan_step`).
+	- `{index}-user.md` almacena con precisión quirúrgica el estado de la memoria en ese turno: System Prompt efectivo, memoria RAG en Árbol (TreeNode), últimos 10 mensajes (5 del usuario + 5 del asistente), la consulta del usuario y la respuesta final del LLM.
+	- Creado `interface/backend/routes/logs.py` y montado en `main.py` con endpoints REST (`GET /api/logs/conversations`, `GET /api/logs/conversations/{session_dir}`, `GET /api/logs/conversations/{session_dir}/{filename}`) con soporte de filtrado por categoría para la interfaz web.
+	- Integrada la auditoría en `routes/call_ws.py`, `routes/chat.py` y `services/sub_agents.py`.

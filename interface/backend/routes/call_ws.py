@@ -16,6 +16,7 @@ from config import settings, ensure_system_prompt, load_default_system_prompt
 from services.silence_killer import format_silence_killer_status
 from services.tree_context_manager import TreeContextManager
 from services.plan_and_solve import is_complex_request, PlanAndSolveOrchestrator
+from services.conversation_logger import conversation_logger
 
 tree_context_manager = TreeContextManager()
 
@@ -672,6 +673,16 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 							"step": step
 						}
 						executed_tools.append(tool_info)
+						try:
+							conversation_logger.log_tool_call(
+								session_id=branch_id,
+								tool_name=tc.name,
+								args=tc.args,
+								result=tool_result,
+								metadata={"duration_seconds": tool_duration}
+							)
+						except Exception as e_log:
+							print(f"[WS Chat] Tool log warning: {e_log}")
 
 						# Emit tool-calling duration and token breakdown to WebSocket 2 (No-streaming)
 						await turn_metrics_manager.emit(turn_id, {
@@ -740,9 +751,21 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 
 				if user_prompt_clean:
 					try:
+						branch = await tree_context_manager.get_or_create_branch(branch_id)
+						active_rag = await tree_context_manager.project_context(branch_id, user_prompt_clean)
+						conversation_logger.log_user_turn(
+							session_id=branch_id,
+							title=user_prompt_clean,
+							system_prompt=load_default_system_prompt(),
+							tree_rag_context=active_rag,
+							last_10_messages=branch.get("messages", []),
+							user_message=user_prompt_clean,
+							final_response=accumulated,
+							metadata={"model": model}
+						)
 						await tree_context_manager.add_turn(branch_id, user_prompt_clean, accumulated)
 					except Exception as e_tree:
-						print(f"[WS Chat] Tree add_turn warning: {e_tree}")
+						print(f"[WS Chat] Tree log/add_turn warning: {e_tree}")
 				break
 
 			except asyncio.CancelledError:
@@ -818,13 +841,23 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 								final_text = res.get("final_text", "")
 								steps = res.get("steps", [])
 
-								# Archive to 3-level tree RAG
+								# Archive to 3-level tree RAG and log each plan step
 								words = clean_user_text.split()
 								topic_name = " ".join(words[:3])[:25]
 								for s in steps:
 									s_id = s.get("step", 1)
 									s_desc = s.get("description", "")
 									s_res = s.get("result", "")
+									try:
+										conversation_logger.log_plan_step(
+											session_id=branch_id,
+											step_id=s_id,
+											description=s_desc,
+											context_given="",
+											result=s_res
+										)
+									except Exception:
+										pass
 									await tree_context_manager.archive_to_tree(
 										branch_id,
 										topic=topic_name,
@@ -832,6 +865,22 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 										detail=s_desc[:35],
 										data=s_res[:100]
 									)
+
+								branch = await tree_context_manager.get_or_create_branch(branch_id)
+								active_rag = await tree_context_manager.project_context(branch_id, clean_user_text)
+								try:
+									conversation_logger.log_user_turn(
+										session_id=branch_id,
+										title=clean_user_text,
+										system_prompt=load_default_system_prompt(),
+										tree_rag_context=active_rag,
+										last_10_messages=branch.get("messages", []),
+										user_message=clean_user_text,
+										final_response=final_text,
+										metadata={"model": model, "plan_and_solve": True}
+									)
+								except Exception as e_log:
+									print(f"[WS Chat] Complex plan log warning: {e_log}")
 
 								await tree_context_manager.add_turn(branch_id, clean_user_text, final_text, auto_topic=topic_name)
 

@@ -16,6 +16,7 @@ from services.adapters import get_adapter
 from config import ensure_system_prompt, settings, load_default_system_prompt
 from services.tree_context_manager import TreeContextManager
 from services.plan_and_solve import is_complex_request, PlanAndSolveOrchestrator
+from services.conversation_logger import conversation_logger
 
 tree_context_manager = TreeContextManager()
 
@@ -66,6 +67,16 @@ async def handle_chat(req: ChatRequest):
 				s_id = s.get("step", 1)
 				s_desc = s.get("description", "")
 				s_res = s.get("result", "")
+				try:
+					conversation_logger.log_plan_step(
+						session_id=branch_id,
+						step_id=s_id,
+						description=s_desc,
+						context_given="",
+						result=s_res
+					)
+				except Exception:
+					pass
 				await tree_context_manager.archive_to_tree(
 					branch_id,
 					topic=topic_name,
@@ -73,6 +84,22 @@ async def handle_chat(req: ChatRequest):
 					detail=s_desc[:35],
 					data=s_res[:100]
 				)
+
+			branch = await tree_context_manager.get_or_create_branch(branch_id)
+			active_rag = await tree_context_manager.project_context(branch_id, clean_user_text)
+			try:
+				conversation_logger.log_user_turn(
+					session_id=branch_id,
+					title=clean_user_text,
+					system_prompt=load_default_system_prompt(),
+					tree_rag_context=active_rag,
+					last_10_messages=branch.get("messages", []),
+					user_message=clean_user_text,
+					final_response=final_text,
+					metadata={"model": selected_model, "plan_and_solve": True}
+				)
+			except Exception as e_log:
+				print(f"[REST Chat] Log warning: {e_log}")
 
 			await tree_context_manager.add_turn(branch_id, clean_user_text, final_text, auto_topic=topic_name)
 
@@ -152,6 +179,15 @@ async def handle_chat(req: ChatRequest):
 						call_tracker=call_tracker
 					)
 					executed_tools.append({"tool": tc.name, "args": tc.args})
+					try:
+						conversation_logger.log_tool_call(
+							session_id=branch_id,
+							tool_name=tc.name,
+							args=tc.args,
+							result=tool_result
+						)
+					except Exception:
+						pass
 					if not settings.HIDE_BACKGROUND:
 						debug_events.append({"stage": "tool_result", "tool": tc.name, "result": tool_result})
 					messages.extend(adapter.format_tool_response(tc, tool_result))
@@ -163,6 +199,21 @@ async def handle_chat(req: ChatRequest):
 			if clean_user_text:
 				assistant_text = res.get("message", {}).get("content", "")
 				if assistant_text:
+					try:
+						branch = await tree_context_manager.get_or_create_branch(branch_id)
+						active_rag = await tree_context_manager.project_context(branch_id, clean_user_text)
+						conversation_logger.log_user_turn(
+							session_id=branch_id,
+							title=clean_user_text,
+							system_prompt=load_default_system_prompt(),
+							tree_rag_context=active_rag,
+							last_10_messages=branch.get("messages", []),
+							user_message=clean_user_text,
+							final_response=assistant_text,
+							metadata={"model": selected_model}
+						)
+					except Exception as e_log:
+						print(f"[REST Chat] User turn log warning: {e_log}")
 					await tree_context_manager.add_turn(branch_id, clean_user_text, assistant_text)
 			return res
 
@@ -172,6 +223,21 @@ async def handle_chat(req: ChatRequest):
 		if clean_user_text:
 			assistant_text = res.get("message", {}).get("content", "")
 			if assistant_text:
+				try:
+					branch = await tree_context_manager.get_or_create_branch(branch_id)
+					active_rag = await tree_context_manager.project_context(branch_id, clean_user_text)
+					conversation_logger.log_user_turn(
+						session_id=branch_id,
+						title=clean_user_text,
+						system_prompt=load_default_system_prompt(),
+						tree_rag_context=active_rag,
+						last_10_messages=branch.get("messages", []),
+						user_message=clean_user_text,
+						final_response=assistant_text,
+						metadata={"model": selected_model}
+					)
+				except Exception as e_log:
+					print(f"[REST Chat] User turn log warning: {e_log}")
 				await tree_context_manager.add_turn(branch_id, clean_user_text, assistant_text)
 		return res
 	except Exception as e:

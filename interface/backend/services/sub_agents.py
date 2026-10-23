@@ -81,12 +81,38 @@ class SubAgent:
 
 				# Content generated without further tool calls
 				content = msg.get("content") or res.get("response") or ""
-				if not content:
-					return f"[{self.name}] No se obtuvo respuesta del sub-agente."
-				return f"[{self.name}]:\n{content}"
+				final_output = f"[{self.name}]:\n{content}" if content else f"[{self.name}] No se obtuvo respuesta del sub-agente."
+				try:
+					from services.conversation_logger import conversation_logger
+					conversation_logger.log_agent_turn(
+						session_id="sub_agents",
+						agent_name=self.key,
+						prompt=prompt,
+						response=final_output,
+						is_cached=bool(model_info.get("in_memory", True)),
+						cache_info=getattr(profile, "prompt_hash", "") or getattr(profile, "raw_hash", ""),
+						metadata={"temperature": target_temperature}
+					)
+				except Exception:
+					pass
+				return final_output
 
 			content = res.get("message", {}).get("content") or res.get("response") or ""
-			return f"[{self.name}]:\n{content}"
+			final_output = f"[{self.name}]:\n{content}"
+			try:
+				from services.conversation_logger import conversation_logger
+				conversation_logger.log_agent_turn(
+					session_id="sub_agents",
+					agent_name=self.key,
+					prompt=prompt,
+					response=final_output,
+					is_cached=bool(model_info.get("in_memory", True)),
+					cache_info=getattr(profile, "prompt_hash", "") or getattr(profile, "raw_hash", ""),
+					metadata={"temperature": target_temperature}
+				)
+			except Exception:
+				pass
+			return final_output
 		except Exception as e:
 			return f"[{self.name}] Error de ejecución: {str(e)}"
 		finally:
