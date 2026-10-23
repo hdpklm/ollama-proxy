@@ -72,9 +72,9 @@ services:
     volumes:
       - ./interface/backend/routes:/app/routes
       - ./interface/backend/services:/app/services
+      - ./interface/backend/tools:/app/tools
       - ./interface/backend/main.py:/app/main.py
       - ./interface/backend/config.py:/app/config.py
-      - ./interface/backend/system_prompt.md:/app/system_prompt.md
       - ./prompts:/app/prompts:ro
       - ./interface/frontend/dist:/app/frontend/dist
       - ${UV_CACHE_DIR:-${HOME:-/root}/.cache/uv}:/root/.cache/uv

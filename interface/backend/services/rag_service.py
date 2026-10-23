@@ -4,7 +4,11 @@ import struct
 import time
 import hashlib
 from typing import Any
-import redis.asyncio as aioredis
+try:
+	import redis.asyncio as aioredis
+except ImportError:
+	aioredis = None
+
 from config import settings
 
 VECTOR_DIM = 128
@@ -43,12 +47,12 @@ def pack_vector(vec: list[float]) -> bytes:
 class RagService:
 	def __init__(self, redis_url: str = settings.REDIS_URL):
 		self.redis_url = redis_url
-		self.client: aioredis.Redis | None = None
+		self.client: Any = None
 		self._memory_cache: dict[str, tuple[float, Any]] = {}
 		self._memory_docs: list[dict] = []
 		self._index_initialized = False
 
-	async def _get_client(self) -> aioredis.Redis | None:
+	async def _get_client(self) -> Any:
 		if self.client is None and self.redis_url:
 			try:
 				self.client = aioredis.from_url(

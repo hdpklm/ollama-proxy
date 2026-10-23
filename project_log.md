@@ -1105,3 +1105,18 @@
 	- **Bucle autónomo en Sub-Agentes**: [`interface/backend/services/sub_agents.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/services/sub_agents.py) ahora ejecuta hasta 3 pasos de tool-calling si el sub-agente invoca herramientas autorizadas (ej. `researcher` buscando y leyendo URLs).
 	- **Sincronización de PromptCache**: [`backend/prompt_cache.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/backend/prompt_cache.py) procesa el frontmatter e indexa exactamente los mismos prompts efectivos para pre-calentamiento KV en memoria RAM.
 	- Se añadieron tests exhaustivos en `LLM_Test/gemini/tests/test_agent_tools.py` y se desplegó y validó en la Raspberry Pi 5.
+
+### 📝 Registro: [v0.9.17] - Modularización de herramientas en paquete tools/ por categorías con handlers vinculados
+- **date-time**: 2026-10-23 02:27:40
+- **Problema**:
+	- Las funciones ejecutoras de herramientas y sus esquemas OpenAI estaban dispersos en `tool_executor.py` y `tool_definitions.py` sin una categorización modular ni un enlace directo entre la especificación JSON y la función ejecutora.
+- **Causa**:
+	- Crecimiento orgánico donde las funciones auxiliares se acumulaban en servicios individuales sin un paquete unificado de herramientas.
+- **Solución**:
+	- Se creó el paquete modular [`interface/backend/tools/`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/tools/) categorizado:
+		- [`tools/web.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/tools/web.py): Herramientas web (`search_web`, `read_url`, `read_pdf`), conteniendo sus funciones y exportando el diccionario `TOOLS` con cada esquema vinculado a su `handler`.
+		- [`tools/delegation.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/tools/delegation.py): Herramientas de sub-agentes (`delegate_to_researcher`, `delegate_to_coder`, `delegate_to_writer`) con esquema y `handler` ejecutable.
+		- [`tools/__init__.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/tools/__init__.py): Registro consolidado `TOOL_REGISTRY`, filtrado contextual por agente y despachador `execute_tool` con guardrails.
+	- [`services/tool_definitions.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/services/tool_definitions.py) y [`services/tool_executor.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/interface/backend/services/tool_executor.py) ahora reexportan limpiamente desde `tools/`.
+	- [`docker-compose.yml`](file:///c:/work/person/hassan/Repos/ollama-proxy/docker-compose.yml): Añadido el volumen `- ./interface/backend/tools:/app/tools`.
+	- Creados tests en `LLM_Test/gemini/tests/test_tools_package.py` y desplegado en la Raspberry Pi 5.
