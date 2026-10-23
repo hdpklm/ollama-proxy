@@ -245,3 +245,75 @@ Lista de características, optimizaciones y tareas pendientes ordenadas por prio
 - [ ] **Perfilado y autorización por huella acústica**:
 	- Análisis del timbre de voz en el microservicio Vosk / STT.
 	- Discriminación de identidad para cargar memorias personales, permisos de domótica y notas privadas únicamente si habla el usuario autorizado (Hassan).
+
+---
+
+## 🧠 Fase 9: Plan-and-Solve con Caché Limpia, Mata-Silencio de Cero Coste y Memoria en Árbol (`TreeNode`)
+
+### 29. Flujo de Planificación Adaptativo Multi-Paso ("Plan-and-Solve") con Aislamiento de Caché
+- [ ] **Activación Condicional Exclusiva para Peticiones Complejas**:
+	- Solo se activa la ruta de planificación si el orquestador detecta que la solicitud requiere múltiples fuentes o pasos secuenciales (ej. *"planifica mi cumpleaños y mira el tiempo en Barcelona"*). Las consultas directas o simples responden inmediatamente por el flujo habitual sin sobrecarga.
+- [ ] **Generación y Desglose de Lista de Pasos (Step-by-Step Task Dict)**:
+	- **Paso 1 (Carga de Caché)**: Carga el prompt base precalentado en RAM.
+	- **Paso 2 (Planificación)**: Genera una lista estructurada (`dict`) con las tareas necesarias y el prompt final de resolución.
+	- **Paso 3 (Ejecución Aislada con Caché Limpia)**:
+		- Cada subtarea se despacha en un **entorno limpio con nuevo contexto/caché**.
+		- Evita la saturación de memoria RAM y la degradación de inferencia al no arrastrar tokens ni historiales innecesarios.
+	- **Paso 4 (Paso de Datos Específicos)**:
+		- El resultado de cada paso se registra en el diccionario.
+		- Si una tarea posterior depende de un resultado anterior, se le inyecta únicamente ese dato concreto sin contaminar el resto del contexto.
+	- **Paso 5 (Síntesis Exhaustiva Final)**:
+		- Una vez completados todos los pasos, se recarga la caché principal con el prompt de cierre para emitir la respuesta final.
+		- **Preservación total de datos**: Directrices estrictas en prompts que prohíben términos reductores (*"resumen"*, *"conclusión"*) y exigen un *"informe estructurado y exhaustivo"* que conserve cifras, fechas, precios y entidades clave.
+	- **Control de Concurrencia en `.env` (`AGENT_EXECUTION_MODE=sequential|parallel`)**:
+		- En Raspberry Pi 5 se fuerza ejecución estrictamente secuencial para mantener el procesador en rangos térmicos óptimos y sin saturar hilos.
+		- En entornos más potentes permite paralelización de tareas independientes.
+- [ ] **Persistencia Limpia en Historial y Enlace al RAG**:
+	- Al finalizar todo el flujo, la investigación completa se archiva estructurada en el RAG.
+	- El historial activo del chat conserva únicamente la pregunta inicial del usuario y la respuesta final con su enlace/referencia interna al RAG (sin contaminar la ventana con los pasos intermedios).
+	- En el HTML de la interfaz no se muestran textos técnicos ni enlaces crudos: únicamente se renderiza la respuesta final y un `<div>` colapsado que al pulsarlo despliega todos los pasos de la investigación.
+
+---
+
+### 30. Sistema "Mata-Silencio" de Cero Coste (Reutilización de Tool Payload) y Colapso Visual
+- [ ] **Feedback inmediato al usuario (< 10 palabras) sin doble inferencia**:
+	- **Cero coste computacional**: No se genera inferencia adicional. El orquestador extrae directamente el parámetro/intención que el modelo ya generó para la herramienta (ej. de `web_search(query="tiempo fin de semana barcelona")` se extrae *"Buscando: tiempo fin de semana barcelona"*).
+	- Se envía al usuario de forma instantánea por WebSocket (< 10 palabras) para eliminar el silencio y la incertidumbre.
+	- Al finalizar cada subtarea de la lista de pasos, emite un aviso de estado corto (< 10 palabras) informando del hito completado.
+- [ ] **Agrupación y Colapso Visual en el Frontend**:
+	- Todos los pasos intermedios, logs de herramientas y llamadas técnicas se empaquetan en la interfaz dentro de un contenedor colapsable con botón (*"Ver pasos de la investigación [N]"*).
+	- La interfaz muestra limpia y en primer plano la respuesta final estructurada.
+
+---
+
+### 31. Ramas de Conversación (Branching) y Ventana Deslizante Estricta de 10 Mensajes
+- [ ] **Ramas de Historial de Chat (Conversation Branching)**:
+	- Capacidad de ramificar o bifurcar una conversación en diferentes caminos temáticos independientes.
+	- Cada rama mantiene su propio historial de turnos recientes y sus propios punteros al árbol de memoria RAG.
+- [ ] **Ventana deslizante de 10 mensajes (5 turnos de usuario + 5 de asistente)**:
+	- El contexto activo del chat se limita estrictamente a los últimos 5 intercambios completos para garantizar predictibilidad absoluta de tokens y prevenir el cuello de botella $O(N^2)$ en la RPi5.
+- [ ] **Desruidado periódico cada 5 mensajes**:
+	- Mecanismo en segundo plano que analiza los últimos 5 turnos y purga preguntas aisladas o descartables (ej. cálculos o consultas casuales como *"¿cuánto es 5x7?"* durante la organización de un viaje) para que no ensucien el historial ni contaminen la indexación de memoria.
+
+---
+
+### 32. Memoria RAG Jerárquica en Árbol de 3 Niveles (`TreeNode`) y Foco Dinámico
+- [ ] **Estructura Jerárquica `TreeNode` en Redis**:
+	- Almacenamiento del conocimiento acumulado en una estructura de 3 niveles:
+		- **Nivel 1 (Tema Principal / Raíz)**: Ej. `cumpleaños`, `fisica cuantica`.
+		- **Nivel 2 (Subtemas / Hijos)**: Ej. `restaurante`, `invitacion`, `patron de interferencia`.
+		- **Nivel 3 (Detalles / Nietos)**: Ej. `casa carmen`, `kfc`, `luis`, `borrador cuantico`.
+- [ ] **Proyección Dinámica de Contexto en el Prompt**:
+	- **Tema Activo (En foco de la conversación actual)**:
+		- Se expanden los 3 niveles completos (Raíz $\rightarrow$ Hijos $\rightarrow$ Nietos) con todos los datos y entidades.
+	- **Temas Inactivos (Históricos de la sesión)**:
+		- Se muestran colapsados en 1 sola línea por tema listando sus ramas principales para que el modelo sepa que existen sin gastar tokens:
+		  `[datos en RAG]:`
+		  `- cumpleaños: restaurante, invitacion`
+		  `- fisica cuantica: patron de interferencia, borrador cuantico`
+- [ ] **Detección de Foco y Transición sin Fricción**:
+	- El orquestador evalúa si la consulta del usuario apunta a la ventana activa o si hace referencia a un nodo archivado.
+	- Si el usuario cambia bruscamente de tema (ej. de *cuántica* pasa a *"¿qué restaurante habíamos visto?"*), el gestor activa el nodo `cumpleaños`, expande sus 3 niveles y contrae `fisica cuantica` a 1 línea.
+- [ ] **Acción manual de archivo**:
+	- Botón en la interfaz web para consolidar o archivar la rama activa directamente en el árbol `TreeNode` de RAG cuando el usuario lo decida.
+
