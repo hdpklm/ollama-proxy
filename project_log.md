@@ -1144,3 +1144,13 @@
 	- `{index}-user.md` almacena con precisión quirúrgica el estado de la memoria en ese turno: System Prompt efectivo, memoria RAG en Árbol (TreeNode), últimos 10 mensajes (5 del usuario + 5 del asistente), la consulta del usuario y la respuesta final del LLM.
 	- Creado `interface/backend/routes/logs.py` y montado en `main.py` con endpoints REST (`GET /api/logs/conversations`, `GET /api/logs/conversations/{session_dir}`, `GET /api/logs/conversations/{session_dir}/{filename}`) con soporte de filtrado por categoría para la interfaz web.
 	- Integrada la auditoría en `routes/call_ws.py`, `routes/chat.py` y `services/sub_agents.py`.
+
+### 📝 Registro: [v0.9.20] - Visor Web Interactivo de Historial con Slider de Sesiones y Acordeón de Razonamiento
+- **date-time**: 2026-10-23 05:07:00
+- **Problema**:
+	- Los logs de auditoría en Markdown almacenados en el backend no contaban con un componente visual en la aplicación web para permitir al usuario explorar sesiones anteriores ni inspeccionar de forma desglosada el flujo de memoria, tools y razonamiento por mensaje.
+- **Causa**:
+	- Ausencia de interfaz interactiva en el frontend React conectada a los endpoints `/api/logs/conversations`.
+- **Solución**:
+	- Creado `interface/frontend/src/components/HistoryModal.jsx`: Modal interactivo que cuenta con un slider lateral izquierdo scrollable con buscador de conversaciones (`GET /api/logs/conversations`), y un cuerpo principal que muestra los mensajes de usuario agrupados por turno. Cada mensaje funciona como un acordeón desplegable que expone: (1) memoria RAG activa en árbol (`TreeNode`), últimos 10 mensajes y system prompt; (2) llamadas intermedias a herramientas (`tool_call`), sub-agentes (`agent_execution`) y pasos de planes multi-paso (`plan_step`); y (3) la respuesta final emitida por el LLM.
+	- Integrado botón de acceso con icono `History` en la cabecera principal de `interface/frontend/src/App.jsx`.
