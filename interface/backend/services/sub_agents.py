@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Dict, Any, List
 from config import settings, load_prompt
 from services.llm_client import LLMClient
@@ -16,7 +17,6 @@ class SubAgent:
 		self.last_metrics: Dict[str, Any] | None = None
 
 	async def run(self, task: str, context: str = "", on_metric: Any = None) -> str:
-		import time
 		t_start = time.time()
 		snapshot_id = f"caller_before_{self.key}"
 		# Preserve active caller KV context in RAM before running sub-agent

@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import re
+import time
 import websockets
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -648,7 +649,6 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 						await websocket.send_json({"type": "assistant_status", "status": silence_status})
 						tool_status_text = "Buscando en web" if "search" in tc.name else ("Consultando subagente" if "researcher" in tc.name or "agent" in tc.name else "Ejecutando herramienta")
 						await websocket.send_json({"type": "status", "status": tool_status_text})
-						import time
 						t_tool_start = time.time()
 						req_str = json.dumps({"tool": tc.name, "arguments": tc.args}, ensure_ascii=False)
 						call_tokens = await llm_service.count_tokens(req_str)

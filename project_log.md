@@ -1250,3 +1250,15 @@
 	- `interface/frontend/src/components/ChatView.jsx`: Se añadió el estado reactivo `modelStatus` con la función normalizadora `formatThreeWords` que restringe el texto a un máximo estricto de 3 palabras.
 	- Se integró visualmente en primera fila justo debajo de "Thinking..." mediante un badge con punto pulsante (`bg-sky-400 animate-pulse`) que informa en vivo la acción del modelo (`"Cargando modelo"`, `"Restaurando memoria"`, `"Evaluando prompt"`, `"Buscando en web"`, `"Leyendo página web"`, `"Ejecutando herramienta"`, `"Consultando subagente"`, `"Razonando respuesta"`, `"Generando respuesta"`).
 	- `interface/backend/routes/call_ws.py`: Se incorporó la emisión inmediata de eventos `{"type": "status", "status": ...}` a través del socket de chat en cada transición de etapa (carga de modelo, restauración KV, evaluación de prompt y ejecución de herramientas).
+
+### 📝 Registro: [v0.9.30] - Corrección de UnboundLocalError 'time' en WebSocket Chat
+- **date-time**: 2026-10-24 09:37:30
+- **Problema**:
+	- En tiempo de ejecución en la Raspberry Pi 5 / contenedor Docker `interface`, el endpoint `/ws/chat` fallaba inmediatamente al recibir una petición con la excepción:
+	  `UnboundLocalError: cannot access local variable 'time' where it is not associated with a value` en `line 523, in stream_tokens: t_turn_start = time.time()`.
+- **Causa**:
+	- El módulo `time` no estaba importado a nivel superior del archivo en `call_ws.py`. Al existir una sentencia `import time` dentro del cuerpo de la función en la llamada a herramientas (antigua línea 651), el compilador de Python consideraba a `time` como variable local para toda la función `stream_tokens`, disparando `UnboundLocalError` al evaluar `time.time()` en la cabecera antes de llegar a dicha línea.
+- **Solución**:
+	- `interface/backend/routes/call_ws.py`: Se importó `import time` en la cabecera del módulo y se eliminó la importación local redundante dentro del bucle de herramientas.
+	- `interface/backend/routes/chat.py` y `interface/backend/services/sub_agents.py`: Se aseguró `import time` a nivel global en todos los módulos de endpoints y servicios relacionados.
+	- Validada la sintaxis con `py_compile` y tests de verificación ejecutados con éxito.
