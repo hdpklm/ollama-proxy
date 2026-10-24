@@ -1273,3 +1273,15 @@
 	- En `backend/prompt_cache.py`: Modificado `apply_cache_if_available` para restaurar directamente `llm.load_state(cached_state)` si existe en RAM, y omitir llamadas síncronas a `llm.eval(tokens)` en tiempo de inferencia, dejando que `create_chat_completion` evalúe el prompt una única vez y eliminando de raíz la duplicación de latencia.
 	- En `interface/backend/routes/call_ws.py`: Ajustados los mensajes de estado en tiempo real vía WebSocket a `"Cargando modelo"`, `"Montando cache"`, `"Evaluando prompt"`, `"Razonando respuesta"`, `"Ejecutando herramienta"` y `"Generando respuesta"`.
 	- En `interface/frontend/src/components/ChatView.jsx`: Incorporado un cronómetro en tiempo real `(Xs)` al lado del estado del modelo debajo de "Thinking...", el cual se reinicia en cada cambio de fase, permitiendo al usuario visualizar con total precisión qué fase está activa y cuántos segundos consume.
+
+### 📝 Registro: [v0.9.32] - Diagnóstico y corrección de discrepancia de hash por ausencia de PyYAML y soporte de modo sin TTS
+- **date-time**: 2026-10-24 10:17:00
+- **Problema**:
+	- Al ejecutar peticiones de chat, el sistema reportaba un tiempo excesivo de evaluación del prompt (~37.288s en Raspberry Pi 5 y ~34s en local), anulando la reutilización de la KV Cache.
+- **Causa**:
+	- 1. Discrepancia crítica de hash entre contenedores: El contenedor Docker `ollama-proxy` no tiene instalada la librería `pyyaml`. En consecuencia, al ejecutar `_parse_and_get_effective_prompt`, la importación de `yaml` fallaba silenciosamente y devolvía únicamente el texto plano del prompt (451 bytes, hash `d8c466cdeaf3db79`), mientras que el contenedor `interface` (que sí dispone de `pyyaml`) construía el prompt con las herramientas completas (2195 bytes, hash `74f9fdc3722ec599`). Al llegar las solicitudes, `ollama-proxy` reportaba `applied cache: False` por disparidad de hash y forzaba la re-evaluación completa de los más de 2500 tokens en CPU en cada turno.
+	- 2. Latencia añadida por invocación síncrona a Piper TTS en turnos de chat cuando el usuario no requiere síntesis por voz.
+- **Solución**:
+	- `backend/prompt_cache.py`: Se implementó la función nativa `_parse_yaml_fallback` sin dependencias externas para parsear el frontmatter y las herramientas de forma idéntica con o sin `pyyaml`. Ahora `ollama-proxy` genera exactamente el mismo hash (`74f9fdc3722ec599`), logrando `applied cache: True` de inmediato.
+	- `interface/backend/routes/call_ws.py`: Se añadió soporte para omitir completamente el chunking de frases y llamadas al sintetizador cuando `tts_mode in ("none", "disabled", "off")`.
+	- `interface/frontend/src/components/ChatView.jsx`: Se añadió el estado `ttsEnabled` (por defecto `false` para modo rápido sin voz) y un botón de alternancia rápida (Voz activa / Sin voz) en la barra superior. Con la caché de prompt activa y sin TTS, las peticiones directas pasan a responder en ~2 segundos.

@@ -85,7 +85,9 @@ class LlamaEngine:
 		if messages:
 			sys_msg = next((m for m in messages if m.get("role") == "system"), None)
 			if sys_msg and sys_msg.get("content"):
-				self.prompt_cache.apply_cache_if_available(llm, sys_msg["content"])
+				h = self.prompt_cache.compute_hash(sys_msg["content"])
+				applied = self.prompt_cache.apply_cache_if_available(llm, sys_msg["content"])
+				print(f"[Engine Debug] Request sys prompt hash: {h}, applied cache: {applied}, llm.n_tokens: {getattr(llm, 'n_tokens', None)}", flush=True)
 
 			if "tools" in job.body and job.body["tools"]:
 				extra_params["tools"] = job.body["tools"]

@@ -627,19 +627,20 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 						await websocket.send_json({"type": "status", "status": "Generando respuesta"})
 					# WebSocket 1: Ultra-fast streaming ONLY (tokens and audio chunks)
 					await websocket.send_json({"type": "token", "token": token})
-					for sentence in chunker.push_token(token):
-						chunk_index += 1
-						if tts_mode == "rpi5":
-							audio_bytes = await tts_service.synthesize(sentence)
-							if audio_bytes:
-								await websocket.send_json({
-									"type": "audio_chunk",
-									"chunk_index": chunk_index,
-									"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
-									"text": sentence
-								})
-						else:
-							await websocket.send_json({"type": "tts_sentence", "chunk_index": chunk_index, "text": sentence})
+					if tts_mode not in ("none", "disabled", "off"):
+						for sentence in chunker.push_token(token):
+							chunk_index += 1
+							if tts_mode == "rpi5":
+								audio_bytes = await tts_service.synthesize(sentence)
+								if audio_bytes:
+									await websocket.send_json({
+										"type": "audio_chunk",
+										"chunk_index": chunk_index,
+										"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+										"text": sentence
+									})
+							elif tts_mode == "browser":
+								await websocket.send_json({"type": "tts_sentence", "chunk_index": chunk_index, "text": sentence})
 
 				tool_calls = adapter.extract_tool_calls(
 					native_tool_calls=accumulated_tool_calls,

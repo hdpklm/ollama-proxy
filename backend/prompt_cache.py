@@ -11,6 +11,52 @@ try:
 except ImportError:
 	PROMPT_CACHE_DIR = os.getenv("PROMPT_CACHE_DIR", "./cache/prompt_states")
 
+def _parse_yaml_fallback(yaml_text: str) -> dict:
+	metadata: Dict[str, Any] = {}
+	current_section = None
+	current_tool = None
+	current_key = None
+
+	for raw_line in yaml_text.splitlines():
+		line = raw_line.rstrip()
+		if not line or line.startswith("#"):
+			continue
+		indent = len(raw_line) - len(raw_line.lstrip(" "))
+		stripped = line.strip()
+
+		if indent == 0 and ":" in stripped:
+			k, v = stripped.split(":", 1)
+			k, v = k.strip(), v.strip().strip('"\'')
+			current_section = k
+			current_tool = None
+			current_key = None
+			if k == "tools":
+				metadata["tools"] = {}
+			else:
+				metadata[k] = float(v) if v.replace(".", "", 1).isdigit() else v
+		elif indent == 2 and current_section == "tools" and ":" in stripped:
+			tool_name = stripped.split(":", 1)[0].strip()
+			current_tool = tool_name
+			current_key = None
+			metadata.setdefault("tools", {})[tool_name] = {}
+		elif indent == 4 and current_tool and ":" in stripped:
+			k, v = stripped.split(":", 1)
+			k, v = k.strip(), v.strip().strip('"\'')
+			current_key = k
+			if k == "rules":
+				metadata.setdefault("tools", {}).setdefault(current_tool, {})["rules"] = []
+			elif k == "max_calls":
+				metadata.setdefault("tools", {}).setdefault(current_tool, {})["max_calls"] = int(v) if v.isdigit() else v
+			elif k == "purpose":
+				metadata.setdefault("tools", {}).setdefault(current_tool, {})["purpose"] = v
+			else:
+				metadata.setdefault("tools", {}).setdefault(current_tool, {})[k] = v
+		elif indent >= 6 and current_tool and current_key == "rules" and stripped.startswith("-"):
+			rule_text = stripped[1:].strip().strip('"\'')
+			metadata.setdefault("tools", {}).setdefault(current_tool, {}).setdefault("rules", []).append(rule_text)
+
+	return metadata
+
 def _parse_and_get_effective_prompt(content: str) -> str:
 	trimmed = content.strip()
 	if not trimmed.startswith("---"):
@@ -23,11 +69,14 @@ def _parse_and_get_effective_prompt(content: str) -> str:
 	yaml_text = parts[1]
 	body_text = parts[2].strip()
 
+	metadata: Dict[str, Any] = {}
 	try:
 		import yaml
 		metadata = yaml.safe_load(yaml_text) or {}
 	except Exception:
-		metadata = {}
+		pass
+	if not metadata:
+		metadata = _parse_yaml_fallback(yaml_text)
 
 	tools_config = metadata.get("tools") or {}
 	if not tools_config:

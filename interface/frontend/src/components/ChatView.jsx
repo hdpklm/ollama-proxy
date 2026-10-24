@@ -22,6 +22,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	const [audioLoadingIndex, setAudioLoadingIndex] = useState(null)
 	const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false)
 	const [openMetricsIndices, setOpenMetricsIndices] = useState({})
+	const [ttsEnabled, setTtsEnabled] = useState(false)
 	const [modelStatus, setModelStatus] = useState("Cargando modelo")
 	const [stepElapsedSeconds, setStepElapsedSeconds] = useState("0.0")
 	const stepStartTimeRef = useRef(Date.now())
@@ -433,7 +434,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 					turn_id: turnId,
 					session_id: chatSessionId,
 					messages: newHistory,
-					tts_mode: settings.useBrowserTTS ? "browser" : "rpi5"
+					tts_mode: ttsEnabled ? (settings.useBrowserTTS ? "browser" : "rpi5") : "none"
 				}))
 			}
 
@@ -785,14 +786,33 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 				<span className="text-[11px] text-slate-500 font-mono truncate">
 					ID: {chatSessionId.length > 20 ? chatSessionId.substring(0, 18) + "..." : chatSessionId}
 				</span>
-				<button
-					onClick={handleNewChat}
-					className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 transition-colors"
-					title="Iniciar nueva conversación limpia"
-				>
-					<PlusCircle className="w-3.5 h-3.5 text-sky-400" />
-					<span>Nuevo chat</span>
-				</button>
+				<div className="flex items-center gap-2">
+					<button
+						type="button"
+						onClick={() => {
+							stopStreamingAudio()
+							setTtsEnabled((prev) => !prev)
+						}}
+						className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors ${
+							ttsEnabled
+								? "bg-sky-950/60 border-sky-800/80 text-sky-400"
+								: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+						}`}
+						title={ttsEnabled ? "Voz activada (clic para silenciar y responder ultra rápido)" : "Sin voz / Silenciado (máxima velocidad sin sintetizador)"}
+					>
+						{ttsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+						<span>{ttsEnabled ? "Voz activa" : "Sin voz"}</span>
+					</button>
+					<button
+						type="button"
+						onClick={handleNewChat}
+						className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 transition-colors"
+						title="Iniciar nueva conversación limpia"
+					>
+						<PlusCircle className="w-3.5 h-3.5 text-sky-400" />
+						<span>Nuevo chat</span>
+					</button>
+				</div>
 			</div>
 
 			{/* Messages Container */}
