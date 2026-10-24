@@ -5,3 +5,4 @@ compile-llama-cpp/.tmp_venv/
 compile-llama-cpp/output/
 modelos/
 node_modules/
+logs/conversations/

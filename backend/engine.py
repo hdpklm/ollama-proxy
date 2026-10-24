@@ -93,6 +93,8 @@ class LlamaEngine:
 
 			# 2. Find and apply the best matching cache (longest common identical token prefix)
 			applied, used_cache, matched_count = self.prompt_cache.apply_best_cache(llm, request_tokens)
+			if not applied and hasattr(llm, "reset"):
+				llm.reset()
 			print(
 				f"[Engine Cache] Request tokens: {len(request_tokens)}, Applied cache: {applied}, "
 				f"Matched prefix: {matched_count} tokens, Used cache: {used_cache.get('cache_id') if used_cache else None}",

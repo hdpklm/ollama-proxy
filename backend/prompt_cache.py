@@ -205,6 +205,8 @@ def build_tools_for_agent_metadata(metadata: dict) -> List[dict]:
 	return built_tools
 
 
+CACHE_FORMAT_VERSION = 3
+
 class PromptCacheManager:
 	def __init__(
 		self,
@@ -275,9 +277,9 @@ class PromptCacheManager:
 						data = pickle.load(f)
 					prompt_hash = data.get("hash")
 					tokens = data.get("tokens", [])
-					# If the cached binary has the stale trailing model tokens, remove it so it's regenerated cleanly
-					if len(tokens) >= 3 and tokens[-3:] == [105, 4368, 107]:
-						print(f"[PromptCache] Stale trailing model tokens in '{filepath}'. Removing to regenerate cleanly.")
+					# Invalidate caches from older versions without clean prefix token slicing
+					if data.get("cache_format_version") != CACHE_FORMAT_VERSION:
+						print(f"[PromptCache] Outdated cache version in '{filepath}' (requires v{CACHE_FORMAT_VERSION}). Removing to regenerate.")
 						try:
 							os.remove(filepath)
 						except Exception:
@@ -494,7 +496,8 @@ class PromptCacheManager:
 			"token_count": len(tokens),
 			"state": state,
 			"is_system": True,
-			"last_used": time.time()
+			"last_used": time.time(),
+			"cache_format_version": CACHE_FORMAT_VERSION
 		}
 
 		try:
