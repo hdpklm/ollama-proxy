@@ -1285,3 +1285,17 @@
 	- `backend/prompt_cache.py`: Se implementó la función nativa `_parse_yaml_fallback` sin dependencias externas para parsear el frontmatter y las herramientas de forma idéntica con o sin `pyyaml`. Ahora `ollama-proxy` genera exactamente el mismo hash (`74f9fdc3722ec599`), logrando `applied cache: True` de inmediato.
 	- `interface/backend/routes/call_ws.py`: Se añadió soporte para omitir completamente el chunking de frases y llamadas al sintetizador cuando `tts_mode in ("none", "disabled", "off")`.
 	- `interface/frontend/src/components/ChatView.jsx`: Se añadió el estado `ttsEnabled` (por defecto `false` para modo rápido sin voz) y un botón de alternancia rápida (Voz activa / Sin voz) en la barra superior. Con la caché de prompt activa y sin TTS, las peticiones directas pasan a responder en ~2 segundos.
+
+### 📝 Registro: [v0.9.33] - Longest Common Prefix Token Cache con Tools y Cachés Temporales In-Place
+- **date-time**: 2026-10-24 11:06:50
+- **Problema**:
+	- En Raspberry Pi 5 la evaluación de prompt tardaba ~35-37 segundos en cada turno porque el LLM no encontraba el caché binario de system prompt al incluir herramientas (tools), provocando que llama_cpp descartara el KV cache y reevaluara todos los tokens desde cero por CPU.
+- **Causa**:
+	- La plantilla Jinja del modelo inyecta la definición JSON de las herramientas dentro del bloque system, por lo que el texto y los tokens reales que ve el LLM difieren completamente de un system prompt crudo en markdown. Al enviar tools, la discrepancia de tokens obligaba a descartar el KV cache. Además, no existía mecanismo dinámico para reutilizar el contexto acumulado de turnos anteriores en diálogos multi-turno.
+- **Solución**:
+	- `backend/prompt_cache.py`: Reescrito para tokenizar con el formateador de chat del LLM (`chat_formatter`) incluyendo las tools de cada agente.
+	- Implementado algoritmo de búsqueda por prefijo de tokens idénticos más largo (`longest common prefix match`): busca el caché cuyos tokens coincidan al 100% como prefijo del prompt recibido y selecciona el más largo, ahorrando cientos o miles de tokens en la inferencia.
+	- Añadido sistema de cachés temporales de turnos con límites configurables en `.env` y `backend/config.py`: `MAX_PROMPT_CACHES` (límite LRU) y `PROMPT_CACHE_TTL` (tiempo máximo de vida).
+	- Implementado reemplazo in-place del caché temporal utilizado cuando todos sus tokens coinciden con el prefijo enviado, permitiendo que las conversaciones evolucionen a ~2.0s por turno sin duplicar memoria.
+	- `backend/engine.py`: Integrada la búsqueda de prefijo en `create_stream` y el generador `_wrap_stream_with_cache_update` para guardar/reemplazar el estado del KV cache justo al emitir el primer token.
+	- Verificado con test multi-turno: Turn 1 (2.07s), Turn 2 (2.02s) y Turn 3 (2.04s).

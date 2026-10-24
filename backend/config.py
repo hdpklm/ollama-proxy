@@ -10,6 +10,8 @@ N_CTX_HIGH = int(os.getenv("N_CTX_HIGH", "2048"))
 N_THREADS = int(os.getenv("N_THREADS", "4"))
 FLASH_ATTN = os.getenv("FLASH_ATTN", "true").strip().lower() in ("true", "1", "yes")
 PROMPT_CACHE_DIR = os.getenv("PROMPT_CACHE_DIR", "./cache/prompt_states")
+MAX_PROMPT_CACHES = int(os.getenv("MAX_PROMPT_CACHES", "10"))
+PROMPT_CACHE_TTL = int(os.getenv("PROMPT_CACHE_TTL", "3600"))
 
 
 def resolve_model_path(model_name: str | None = None) -> str:

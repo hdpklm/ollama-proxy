@@ -1,15 +1,19 @@
 from __future__ import annotations
 import os
 import glob
+import time
+import json
 import hashlib
 import pickle
 import traceback
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 
 try:
-	from backend.config import PROMPT_CACHE_DIR
+	from backend.config import PROMPT_CACHE_DIR, MAX_PROMPT_CACHES, PROMPT_CACHE_TTL
 except ImportError:
 	PROMPT_CACHE_DIR = os.getenv("PROMPT_CACHE_DIR", "./cache/prompt_states")
+	MAX_PROMPT_CACHES = int(os.getenv("MAX_PROMPT_CACHES", "10"))
+	PROMPT_CACHE_TTL = int(os.getenv("PROMPT_CACHE_TTL", "3600"))
 
 def _parse_yaml_fallback(yaml_text: str) -> dict:
 	metadata: Dict[str, Any] = {}
@@ -57,14 +61,14 @@ def _parse_yaml_fallback(yaml_text: str) -> dict:
 
 	return metadata
 
-def _parse_and_get_effective_prompt(content: str) -> str:
+def _parse_and_get_effective_prompt(content: str) -> Tuple[str, dict]:
 	trimmed = content.strip()
 	if not trimmed.startswith("---"):
-		return content
+		return content, {}
 
 	parts = trimmed.split("---", 2)
 	if len(parts) < 3:
-		return content
+		return content, {}
 
 	yaml_text = parts[1]
 	body_text = parts[2].strip()
@@ -80,7 +84,7 @@ def _parse_and_get_effective_prompt(content: str) -> str:
 
 	tools_config = metadata.get("tools") or {}
 	if not tools_config:
-		return body_text
+		return body_text, metadata
 
 	guidelines = ["\n\n## Herramientas Asignadas y Directrices de Uso"]
 	guidelines.append("Dispones ÚNICAMENTE de las siguientes herramientas autorizadas para tu rol:")
@@ -105,15 +109,37 @@ def _parse_and_get_effective_prompt(content: str) -> str:
 		guidelines.append("\n".join(tool_block))
 
 	guidelines.append("\n**IMPORTANTE**: No intentes invocar ninguna herramienta ajena a esta lista ni superar los límites fijados.")
-	return body_text + "\n" + "\n".join(guidelines)
+	return body_text + "\n" + "\n".join(guidelines), metadata
 
-def load_all_agent_prompts() -> Dict[str, str]:
+def load_master_tools_registry() -> Dict[str, dict]:
+	search_dirs = [
+		os.getenv("PROMPTS_DIR", ""),
+		"/app/prompts",
+		"./prompts",
+		"../prompts",
+		os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "prompts"))
+	]
+	for d in search_dirs:
+		if d and os.path.isdir(d):
+			candidate = os.path.join(d, "tools_registry.json")
+			if os.path.exists(candidate):
+				try:
+					with open(candidate, "r", encoding="utf-8") as f:
+						return json.load(f)
+				except Exception:
+					pass
+	return {}
+
+MASTER_TOOLS_REGISTRY: Dict[str, dict] = load_master_tools_registry()
+
+def load_all_agent_prompts_and_metadata() -> Tuple[Dict[str, str], Dict[str, dict]]:
 	prompts: Dict[str, str] = {
 		"main_agent": "Eres un asistente conversacional inteligente, conciso y directo en español.",
 		"researcher": "Eres un sub-agente especialista en investigación y análisis factual riguroso.",
 		"coder": "Eres un sub-agente ingeniero de software senior.",
 		"writer": "Eres un sub-agente especialista en redacción ejecutiva y comunicación clara."
 	}
+	agent_meta: Dict[str, dict] = {}
 
 	search_dirs = [
 		os.getenv("PROMPTS_DIR", ""),
@@ -137,28 +163,71 @@ def load_all_agent_prompts() -> Dict[str, str]:
 					with open(filepath, "r", encoding="utf-8") as f:
 						raw_content = f.read().strip()
 						if raw_content:
-							effective_content = _parse_and_get_effective_prompt(raw_content)
-							if stem in ("system_prompt", "main", "main_agent"):
-								prompts["main_agent"] = effective_content
-							else:
-								prompts[stem] = effective_content
+							effective_content, meta = _parse_and_get_effective_prompt(raw_content)
+							key = "main_agent" if stem in ("system_prompt", "main", "main_agent") else stem
+							prompts[key] = effective_content
+							agent_meta[key] = meta
 				except Exception:
 					pass
-	return prompts
+	return prompts, agent_meta
 
-DEFAULT_AGENT_PROMPTS: Dict[str, str] = load_all_agent_prompts()
+DEFAULT_AGENT_PROMPTS, DEFAULT_AGENT_METADATA = load_all_agent_prompts_and_metadata()
+
+def build_tools_for_agent_metadata(metadata: dict) -> List[dict]:
+	tools_cfg = metadata.get("tools") or {}
+	if not tools_cfg:
+		return []
+
+	built_tools = []
+	for tool_name, cfg in tools_cfg.items():
+		registry_entry = MASTER_TOOLS_REGISTRY.get(tool_name)
+		if registry_entry:
+			schema_copy = json.loads(json.dumps(registry_entry))
+			if isinstance(cfg, dict) and cfg.get("purpose"):
+				schema_copy["function"]["description"] = cfg["purpose"]
+			built_tools.append(schema_copy)
+		else:
+			purpose = cfg.get("purpose", "") if isinstance(cfg, dict) else ""
+			built_tools.append({
+				"type": "function",
+				"function": {
+					"name": tool_name,
+					"description": purpose or f"Herramienta {tool_name}",
+					"parameters": {
+						"type": "object",
+						"properties": {
+							"task": {"type": "string", "description": "Tarea a procesar"}
+						},
+						"required": ["task"]
+					}
+				}
+			})
+	return built_tools
 
 
 class PromptCacheManager:
-	def __init__(self, cache_dir: str | None = None, configured_prompts: Dict[str, str] | None = None):
-		self.cache_dir = cache_dir or os.getenv("PROMPT_CACHE_DIR", "./cache/prompt_states")
+	def __init__(
+		self,
+		cache_dir: str | None = None,
+		configured_prompts: Dict[str, str] | None = None,
+		max_caches: int | None = None,
+		ttl_seconds: int | None = None
+	):
+		self.cache_dir = cache_dir or PROMPT_CACHE_DIR
 		os.makedirs(self.cache_dir, exist_ok=True)
 		self.configured_prompts: Dict[str, str] = configured_prompts if configured_prompts is not None else DEFAULT_AGENT_PROMPTS
-		# In-memory RAM cache: hash -> cached payload dictionary
+		self.agent_metadata: Dict[str, dict] = DEFAULT_AGENT_METADATA
+		self.max_caches: int = max_caches or MAX_PROMPT_CACHES
+		self.ttl_seconds: int = ttl_seconds or PROMPT_CACHE_TTL
+
+		# System prompts RAM cache: hash -> cache payload dict
 		self.ram_cache: Dict[str, Dict[str, Any]] = {}
-		# Agent to current hash mapping: agent_name -> current_hash
 		self.agent_hash_map: Dict[str, str] = {}
-		# In-memory caller context snapshots: snapshot_id -> saved LlamaState
+
+		# Dynamic temporal caches: list of {cache_id, tokens, token_count, state, last_used, is_system}
+		self.temporal_caches: List[Dict[str, Any]] = []
+
+		# In-memory caller context snapshots for delegation
 		self.ram_snapshots: Dict[str, Any] = {}
 		self.load_configured_to_ram()
 
@@ -176,8 +245,14 @@ class PromptCacheManager:
 		return state
 
 	@staticmethod
-	def compute_hash(prompt_text: str) -> str:
+	def compute_hash(prompt_text: str, tools: list | None = None) -> str:
 		clean_text = prompt_text.strip()
+		if tools:
+			try:
+				tools_str = json.dumps(tools, sort_keys=True)
+				clean_text += "##TOOLS##" + tools_str
+			except Exception:
+				pass
 		return hashlib.sha256(clean_text.encode("utf-8")).hexdigest()[:16]
 
 	def get_cache_filepath(self, agent_name: str, prompt_hash: str) -> str:
@@ -188,7 +263,9 @@ class PromptCacheManager:
 		prompts_to_load = self.configured_prompts or DEFAULT_AGENT_PROMPTS
 
 		for agent_name, prompt_text in prompts_to_load.items():
-			expected_hash = self.compute_hash(prompt_text)
+			meta = self.agent_metadata.get(agent_name, {})
+			agent_tools = build_tools_for_agent_metadata(meta)
+			expected_hash = self.compute_hash(prompt_text, tools=agent_tools if agent_tools else None)
 			self.remove_stale_agent_cache(agent_name, expected_hash)
 			filepath = self.get_cache_filepath(agent_name, expected_hash)
 
@@ -198,6 +275,9 @@ class PromptCacheManager:
 						data = pickle.load(f)
 					prompt_hash = data.get("hash")
 					if prompt_hash == expected_hash and "state" in data:
+						data["is_system"] = True
+						data["last_used"] = time.time()
+						data["token_count"] = len(data.get("tokens", []))
 						self.ram_cache[prompt_hash] = data
 						self.agent_hash_map[agent_name] = prompt_hash
 						loaded_count += 1
@@ -205,9 +285,6 @@ class PromptCacheManager:
 					print(f"[PromptCache] Failed to load binary cache '{filepath}': {e}")
 
 		print(f"[PromptCache] Pre-loaded {loaded_count} configured binary prompt caches into RAM.")
-
-	def load_all_to_ram(self):
-		return self.load_configured_to_ram()
 
 	def remove_stale_agent_cache(self, agent_name: str, new_hash: str):
 		pattern = os.path.join(self.cache_dir, f"{agent_name}_*.bin")
@@ -220,22 +297,182 @@ class PromptCacheManager:
 				except Exception as e:
 					print(f"[PromptCache] Failed removing stale cache '{filepath}': {e}")
 
-	def get_cached_state_by_hash(self, prompt_hash: str) -> Optional[Any]:
-		cached = self.ram_cache.get(prompt_hash)
-		if cached:
-			return cached.get("state")
+	def get_chat_formatter(self, llm: Any) -> Any:
+		handler = getattr(llm, "chat_handler", None)
+		if not handler and hasattr(llm, "_chat_handlers"):
+			chat_fmt = getattr(llm, "chat_format", "chat_template.default")
+			handler = llm._chat_handlers.get(chat_fmt) or llm._chat_handlers.get("chat_template.default")
+
+		if handler and hasattr(handler, "__closure__") and handler.__closure__:
+			for cell in handler.__closure__:
+				if callable(cell.cell_contents):
+					return cell.cell_contents
 		return None
 
-	def save_cache(self, agent_name: str, prompt_text: str, state: Any, tokens: list) -> str:
-		prompt_hash = self.compute_hash(prompt_text)
+	def tokenize_messages(self, llm: Any, messages: list, tools: list | None = None) -> List[int]:
+		if not llm or not hasattr(llm, "tokenize"):
+			return []
+
+		formatter = self.get_chat_formatter(llm)
+		if formatter:
+			kwargs: Dict[str, Any] = {}
+			if tools:
+				kwargs["tools"] = tools
+			try:
+				res = formatter(messages=messages, **kwargs)
+				prompt_text = getattr(res, "prompt", str(res))
+				added_special = getattr(res, "added_special", False)
+				return list(llm.tokenize(prompt_text.encode("utf-8"), add_bos=not added_special, special=True))
+			except Exception as e:
+				print(f"[PromptCache] Warning: Chat formatter tokenize failed: {e}")
+
+		# Fallback tokenization
+		sys_msg = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
+		if sys_msg:
+			return list(llm.tokenize(sys_msg.encode("utf-8")))
+		return []
+
+	def tokenize_system_prompt_prefix(self, llm: Any, prompt_text: str, tools: list | None = None) -> List[int]:
+		if not llm or not hasattr(llm, "tokenize"):
+			return []
+
+		formatter = self.get_chat_formatter(llm)
+		if formatter:
+			kwargs: Dict[str, Any] = {}
+			if tools:
+				kwargs["tools"] = tools
+			try:
+				sentinel = "__USER_PROMPT_SENTINEL__"
+				res = formatter(
+					messages=[
+						{"role": "system", "content": prompt_text},
+						{"role": "user", "content": sentinel}
+					],
+					**kwargs
+				)
+				raw = getattr(res, "prompt", str(res))
+				user_delimiters = [
+					"<start_of_turn>user",
+					"<|im_start|>user",
+					"<|start_header_id|>user",
+					"[INST]"
+				]
+				for delim in user_delimiters:
+					if delim in raw:
+						raw = raw.split(delim)[0]
+						break
+				added_special = getattr(res, "added_special", False)
+				return list(llm.tokenize(raw.encode("utf-8"), add_bos=not added_special, special=True))
+			except Exception as e:
+				print(f"[PromptCache] Notice in tokenize_system_prompt_prefix: {e}")
+
+		return list(llm.tokenize(prompt_text.encode("utf-8")))
+
+	def clean_expired_temporals(self):
+		now = time.time()
+		valid_temporals = []
+		for entry in self.temporal_caches:
+			if (now - entry.get("last_used", now)) <= self.ttl_seconds:
+				valid_temporals.append(entry)
+			else:
+				print(f"[PromptCache] Expired temporal cache '{entry.get('cache_id')}' (TTL {self.ttl_seconds}s reached).")
+		self.temporal_caches = valid_temporals
+
+	def enforce_max_caches(self):
+		if len(self.temporal_caches) > self.max_caches:
+			# Sort by last_used ascending (least recently used first)
+			self.temporal_caches.sort(key=lambda c: c.get("last_used", 0.0))
+			excess = len(self.temporal_caches) - self.max_caches
+			removed = self.temporal_caches[:excess]
+			self.temporal_caches = self.temporal_caches[excess:]
+			for r in removed:
+				print(f"[PromptCache] Evicted LRU temporal cache '{r.get('cache_id')}' (limit {self.max_caches}).")
+
+	def find_best_matching_cache(self, request_tokens: List[int]) -> Optional[Dict[str, Any]]:
+		if not request_tokens:
+			return None
+
+		self.clean_expired_temporals()
+
+		best_cache: Optional[Dict[str, Any]] = None
+		max_matched_len = 0
+
+		# 1. System prompt caches (permanent)
+		system_entries = list(self.ram_cache.values())
+		# 2. Dynamic temporal caches
+		candidates = system_entries + self.temporal_caches
+
+		for entry in candidates:
+			cached_tokens = entry.get("tokens") or []
+			c_len = len(cached_tokens)
+			if c_len == 0 or c_len > len(request_tokens):
+				continue
+
+			# Verify all tokens of cached entry match the prefix of request_tokens
+			if request_tokens[:c_len] == cached_tokens:
+				if c_len > max_matched_len:
+					max_matched_len = c_len
+					best_cache = entry
+
+		return best_cache
+
+	def apply_best_cache(self, llm: Any, request_tokens: List[int]) -> Tuple[bool, Optional[Dict[str, Any]], int]:
+		best_cache = self.find_best_matching_cache(request_tokens)
+		if best_cache and hasattr(llm, "load_state"):
+			try:
+				llm.load_state(best_cache["state"])
+				best_cache["last_used"] = time.time()
+				matched_count = len(best_cache.get("tokens", []))
+				return True, best_cache, matched_count
+			except Exception as e:
+				print(f"[PromptCache] Error loading state from best cache: {e}")
+		return False, None, 0
+
+	def save_or_replace_temporal_cache(
+		self,
+		used_cache: Optional[Dict[str, Any]],
+		request_tokens: List[int],
+		new_state: Any
+	):
+		now = time.time()
+		# If a non-system cache was used and its tokens completely matched the prefix:
+		if used_cache and not used_cache.get("is_system", False):
+			cached_tokens = used_cache.get("tokens", [])
+			if cached_tokens and request_tokens[:len(cached_tokens)] == cached_tokens:
+				used_cache["tokens"] = list(request_tokens)
+				used_cache["token_count"] = len(request_tokens)
+				used_cache["state"] = new_state
+				used_cache["last_used"] = now
+				print(f"[PromptCache] Replaced temporal cache '{used_cache.get('cache_id')}' with {len(request_tokens)} tokens.")
+				return
+
+		# Otherwise create a new temporal cache
+		cache_id = f"temporal_{int(now * 1000)}_{len(request_tokens)}"
+		entry = {
+			"cache_id": cache_id,
+			"tokens": list(request_tokens),
+			"token_count": len(request_tokens),
+			"state": new_state,
+			"last_used": now,
+			"is_system": False
+		}
+		self.temporal_caches.append(entry)
+		self.enforce_max_caches()
+		print(f"[PromptCache] Saved new temporal cache '{cache_id}' ({len(request_tokens)} tokens). Active temporals: {len(self.temporal_caches)}.")
+
+	def save_cache(self, agent_name: str, prompt_text: str, state: Any, tokens: list, tools: list | None = None) -> str:
+		prompt_hash = self.compute_hash(prompt_text, tools=tools)
 		self.remove_stale_agent_cache(agent_name, prompt_hash)
 
 		filepath = self.get_cache_filepath(agent_name, prompt_hash)
 		payload = {
 			"agent_name": agent_name,
 			"hash": prompt_hash,
-			"tokens": tokens,
-			"state": state
+			"tokens": list(tokens),
+			"token_count": len(tokens),
+			"state": state,
+			"is_system": True,
+			"last_used": time.time()
 		}
 
 		try:
@@ -249,80 +486,33 @@ class PromptCacheManager:
 
 		return prompt_hash
 
-	def identify_agent_name(self, prompt_text: str) -> str:
-		prompt_hash = self.compute_hash(prompt_text)
-		prompts_dict = self.configured_prompts or DEFAULT_AGENT_PROMPTS
-		for agent_name, text in prompts_dict.items():
-			if self.compute_hash(text) == prompt_hash:
-				return agent_name
-		for agent_name, stored_hash in self.agent_hash_map.items():
-			if stored_hash == prompt_hash:
-				return agent_name
-		return f"agent_{prompt_hash[:8]}"
-
-	def get_chat_formatted_system_prompt(self, llm: Any, prompt_text: str) -> Optional[str]:
-		try:
-			handler = getattr(llm, "chat_handler", None)
-			if not handler and hasattr(llm, "_chat_handlers"):
-				chat_fmt = getattr(llm, "chat_format", "chat_template.default")
-				handler = llm._chat_handlers.get(chat_fmt) or llm._chat_handlers.get("chat_template.default")
-			if handler and hasattr(handler, "__closure__") and handler.__closure__:
-				formatter = handler.__closure__[0].cell_contents
-				if callable(formatter):
-					res = formatter(messages=[{"role": "system", "content": prompt_text}])
-					raw_prompt = getattr(res, "prompt", str(res))
-					for delimiter in (
-						"<|turn>model\n",
-						"<|im_start|>assistant\n",
-						"<start_of_turn>model\n",
-						"<|start_header_id|>assistant<|end_header_id|>\n\n",
-						"[INST]"
-					):
-						if delimiter in raw_prompt:
-							return raw_prompt.split(delimiter)[0]
-					return raw_prompt
-		except Exception as e:
-			print(f"[PromptCache] Notice: Chat formatter extraction fallback: {e}")
-		return None
-
 	def warmup_defaults(self, llm: Any):
 		if not llm:
 			return
 
-		print("[PromptCache] Warming up default agent system prompt caches...")
+		print("[PromptCache] Warming up default agent system prompt caches with tools...")
 		prompts_to_warm = self.configured_prompts or DEFAULT_AGENT_PROMPTS
 		for agent_name, prompt_text in prompts_to_warm.items():
-			prompt_hash = self.compute_hash(prompt_text)
+			meta = self.agent_metadata.get(agent_name, {})
+			agent_tools = build_tools_for_agent_metadata(meta)
+			prompt_hash = self.compute_hash(prompt_text, tools=agent_tools if agent_tools else None)
+
 			if prompt_hash in self.ram_cache:
 				continue
 
 			try:
 				if hasattr(llm, "reset"):
 					llm.reset()
-				formatted_sys = self.get_chat_formatted_system_prompt(llm, prompt_text)
-				if formatted_sys and hasattr(llm, "tokenize"):
-					tokens = llm.tokenize(formatted_sys.encode("utf-8"), add_bos=False)
-				else:
-					tokens = llm.tokenize(prompt_text.encode("utf-8")) if hasattr(llm, "tokenize") else []
+
+				tokens = self.tokenize_system_prompt_prefix(llm, prompt_text, tools=agent_tools if agent_tools else None)
 
 				if tokens and hasattr(llm, "eval"):
 					llm.eval(tokens)
 				if hasattr(llm, "save_state"):
 					state = llm.save_state()
-					self.save_cache(agent_name, prompt_text, state, tokens)
+					self.save_cache(agent_name, prompt_text, state, tokens, tools=agent_tools if agent_tools else None)
 			except Exception as e:
 				print(f"[PromptCache] Warning: Could not pre-evaluate '{agent_name}': {e}")
-
-	def apply_cache_if_available(self, llm: Any, prompt_text: str) -> bool:
-		prompt_hash = self.compute_hash(prompt_text)
-		cached_state = self.get_cached_state_by_hash(prompt_hash)
-		if cached_state and hasattr(llm, "load_state"):
-			try:
-				llm.load_state(cached_state)
-				return True
-			except Exception as e:
-				print(f"[PromptCache] Error loading cached state for hash {prompt_hash}: {e}")
-		return False
 
 	def get_memory_breakdown(self) -> dict:
 		prompt_caches = []
@@ -330,51 +520,38 @@ class PromptCacheManager:
 
 		for h, data in self.ram_cache.items():
 			token_count = len(data.get("tokens", []))
-			state = data.get("state")
-			state_bytes = 0
-			if state is not None:
-				try:
-					import sys
-					state_bytes = sys.getsizeof(state)
-				except Exception:
-					pass
-			# KV cache memory formula: 0.125 MB per token
 			kv_mb = round(token_count * 0.125, 2)
-			allocated_mb = max(kv_mb, round(state_bytes / (1024 * 1024), 2))
-			total_prompt_cache_ram_mb += allocated_mb
+			total_prompt_cache_ram_mb += kv_mb
 			prompt_caches.append({
 				"agent_name": data.get("agent_name", "custom"),
 				"hash": h,
 				"tokens": token_count,
 				"kv_ram_mb": kv_mb,
-				"total_mb": round(allocated_mb, 2)
+				"total_mb": kv_mb
 			})
 
 		temporal_snapshots = []
 		total_temporal_ram_mb = 0.0
-		for snap_id, state in self.ram_snapshots.items():
-			snap_bytes = 0
-			if state is not None:
-				try:
-					import sys
-					snap_bytes = sys.getsizeof(state)
-				except Exception:
-					pass
-			snap_mb = round(snap_bytes / (1024 * 1024), 2)
-			# Fallback minimum estimate for active Llama state context
-			if snap_mb < 0.1:
-				snap_mb = 16.0
-			total_temporal_ram_mb += snap_mb
+		self.clean_expired_temporals()
+
+		for entry in self.temporal_caches:
+			t_count = len(entry.get("tokens", []))
+			kv_mb = round(t_count * 0.125, 2)
+			total_temporal_ram_mb += kv_mb
 			temporal_snapshots.append({
-				"snapshot_id": snap_id,
-				"total_mb": round(snap_mb, 2)
+				"cache_id": entry.get("cache_id"),
+				"tokens": t_count,
+				"total_mb": kv_mb,
+				"last_used": entry.get("last_used")
 			})
 
 		return {
 			"prompt_caches": prompt_caches,
 			"prompt_caches_total_mb": round(total_prompt_cache_ram_mb, 2),
 			"prompt_caches_count": len(prompt_caches),
-			"temporal_snapshots": temporal_snapshots,
-			"temporal_snapshots_total_mb": round(total_temporal_ram_mb, 2),
-			"temporal_snapshots_count": len(temporal_snapshots),
+			"temporal_caches": temporal_snapshots,
+			"temporal_caches_total_mb": round(total_temporal_ram_mb, 2),
+			"temporal_caches_count": len(temporal_snapshots),
+			"max_caches": self.max_caches,
+			"ttl_seconds": self.ttl_seconds
 		}

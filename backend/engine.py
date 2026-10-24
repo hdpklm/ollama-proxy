@@ -83,22 +83,30 @@ class LlamaEngine:
 				extra_params["top_p"] = float(job.body["top_p"])
 
 		if messages:
-			sys_msg = next((m for m in messages if m.get("role") == "system"), None)
-			if sys_msg and sys_msg.get("content"):
-				h = self.prompt_cache.compute_hash(sys_msg["content"])
-				applied = self.prompt_cache.apply_cache_if_available(llm, sys_msg["content"])
-				print(f"[Engine Debug] Request sys prompt hash: {h}, applied cache: {applied}, llm.n_tokens: {getattr(llm, 'n_tokens', None)}", flush=True)
-
-			if "tools" in job.body and job.body["tools"]:
-				extra_params["tools"] = job.body["tools"]
+			tools = job.body.get("tools")
+			if tools:
+				extra_params["tools"] = tools
 				extra_params["tool_choice"] = job.body.get("tool_choice") or "auto"
 
-			return llm.create_chat_completion(
+			# 1. Tokenize messages and tools exactly as formatted for the LLM
+			request_tokens = self.prompt_cache.tokenize_messages(llm, messages, tools=tools)
+
+			# 2. Find and apply the best matching cache (longest common identical token prefix)
+			applied, used_cache, matched_count = self.prompt_cache.apply_best_cache(llm, request_tokens)
+			print(
+				f"[Engine Cache] Request tokens: {len(request_tokens)}, Applied cache: {applied}, "
+				f"Matched prefix: {matched_count} tokens, Used cache: {used_cache.get('cache_id') if used_cache else None}",
+				flush=True
+			)
+
+			stream = llm.create_chat_completion(
 				messages=messages,
 				max_tokens=limit,
 				stream=True,
 				**extra_params,
 			)
+
+			return self._wrap_stream_with_cache_update(llm, stream, used_cache, request_tokens)
 
 		prompt = str(job.body.get("prompt", ""))
 		return llm(
@@ -107,6 +115,25 @@ class LlamaEngine:
 			stream=True,
 			**extra_params,
 		)
+
+	def _wrap_stream_with_cache_update(
+		self,
+		llm: Any,
+		stream: Any,
+		used_cache: Optional[dict],
+		request_tokens: List[int]
+	):
+		first_chunk = True
+		for chunk in stream:
+			if first_chunk:
+				first_chunk = False
+				try:
+					if hasattr(llm, "save_state") and request_tokens:
+						new_state = llm.save_state()
+						self.prompt_cache.save_or_replace_temporal_cache(used_cache, request_tokens, new_state)
+				except Exception as e:
+					print(f"[Engine] Warning: Could not update temporal cache: {e}", flush=True)
+			yield chunk
 
 	def extract_chunk(self, job: Job, chunk: dict) -> Tuple[str | dict, str | None]:
 		choice = chunk["choices"][0]

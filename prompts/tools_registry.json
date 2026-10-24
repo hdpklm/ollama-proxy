@@ -1,0 +1,128 @@
+{
+  "search_web": {
+    "type": "function",
+    "function": {
+      "name": "search_web",
+      "description": "Busca en internet información actualizada sobre eventos, noticias, meteorología o datos recientes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Texto exacto o término a buscar en la web."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  "read_url": {
+    "type": "function",
+    "function": {
+      "name": "read_url",
+      "description": "Descarga y extrae el texto principal en formato markdown de una página web.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL completa http o https de la página web a leer."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    }
+  },
+  "read_pdf": {
+    "type": "function",
+    "function": {
+      "name": "read_pdf",
+      "description": "Descarga y extrae el contenido de texto de un archivo PDF ubicado en una URL.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL completa del documento PDF a procesar."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    }
+  },
+  "delegate_to_researcher": {
+    "type": "function",
+    "function": {
+      "name": "delegate_to_researcher",
+      "description": "Delega consultas complejas de análisis técnico, investigación y síntesis de datos factuales.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Instrucción o tarea específica que debe resolver este sub-agente."
+          },
+          "context": {
+            "type": "string",
+            "description": "Contexto adicional, datos o código relevante necesario para resolver la tarea."
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    }
+  },
+  "delegate_to_coder": {
+    "type": "function",
+    "function": {
+      "name": "delegate_to_coder",
+      "description": "Delega tareas de desarrollo de software, algoritmos, depuración y arquitectura de código.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Instrucción o tarea específica que debe resolver este sub-agente."
+          },
+          "context": {
+            "type": "string",
+            "description": "Contexto adicional, datos o código relevante necesario para resolver la tarea."
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    }
+  },
+  "delegate_to_writer": {
+    "type": "function",
+    "function": {
+      "name": "delegate_to_writer",
+      "description": "Delega redacción de correos, síntesis ejecutivas, comunicados formales o mejora de estilo.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Instrucción o tarea específica que debe resolver este sub-agente."
+          },
+          "context": {
+            "type": "string",
+            "description": "Contexto adicional, datos o código relevante necesario para resolver la tarea."
+          }
+        },
+        "required": [
+          "task"
+        ]
+      }
+    }
+  }
+}
