@@ -101,16 +101,17 @@ DEFAULT_AGENT_PROMPTS: Dict[str, str] = load_all_agent_prompts()
 
 
 class PromptCacheManager:
-	def __init__(self, cache_dir: str | None = None):
+	def __init__(self, cache_dir: str | None = None, configured_prompts: Dict[str, str] | None = None):
 		self.cache_dir = cache_dir or os.getenv("PROMPT_CACHE_DIR", "./cache/prompt_states")
 		os.makedirs(self.cache_dir, exist_ok=True)
+		self.configured_prompts: Dict[str, str] = configured_prompts if configured_prompts is not None else DEFAULT_AGENT_PROMPTS
 		# In-memory RAM cache: hash -> cached payload dictionary
 		self.ram_cache: Dict[str, Dict[str, Any]] = {}
 		# Agent to current hash mapping: agent_name -> current_hash
 		self.agent_hash_map: Dict[str, str] = {}
 		# In-memory caller context snapshots: snapshot_id -> saved LlamaState
 		self.ram_snapshots: Dict[str, Any] = {}
-		self.load_all_to_ram()
+		self.load_configured_to_ram()
 
 	def save_snapshot(self, snapshot_id: str, state: Any):
 		self.ram_snapshots[snapshot_id] = state
@@ -133,25 +134,31 @@ class PromptCacheManager:
 	def get_cache_filepath(self, agent_name: str, prompt_hash: str) -> str:
 		return os.path.join(self.cache_dir, f"{agent_name}_{prompt_hash}.bin")
 
-	def load_all_to_ram(self):
-		pattern = os.path.join(self.cache_dir, "*.bin")
-		found_files = glob.glob(pattern)
+	def load_configured_to_ram(self):
 		loaded_count = 0
+		prompts_to_load = self.configured_prompts or DEFAULT_AGENT_PROMPTS
 
-		for filepath in found_files:
-			try:
-				with open(filepath, "rb") as f:
-					data = pickle.load(f)
-				prompt_hash = data.get("hash")
-				agent_name = data.get("agent_name", "custom")
-				if prompt_hash and "state" in data:
-					self.ram_cache[prompt_hash] = data
-					self.agent_hash_map[agent_name] = prompt_hash
-					loaded_count += 1
-			except Exception as e:
-				print(f"[PromptCache] Failed to load binary cache '{filepath}': {e}")
+		for agent_name, prompt_text in prompts_to_load.items():
+			expected_hash = self.compute_hash(prompt_text)
+			self.remove_stale_agent_cache(agent_name, expected_hash)
+			filepath = self.get_cache_filepath(agent_name, expected_hash)
 
-		print(f"[PromptCache] Pre-loaded {loaded_count} binary prompt caches into RAM.")
+			if os.path.exists(filepath):
+				try:
+					with open(filepath, "rb") as f:
+						data = pickle.load(f)
+					prompt_hash = data.get("hash")
+					if prompt_hash == expected_hash and "state" in data:
+						self.ram_cache[prompt_hash] = data
+						self.agent_hash_map[agent_name] = prompt_hash
+						loaded_count += 1
+				except Exception as e:
+					print(f"[PromptCache] Failed to load binary cache '{filepath}': {e}")
+
+		print(f"[PromptCache] Pre-loaded {loaded_count} configured binary prompt caches into RAM.")
+
+	def load_all_to_ram(self):
+		return self.load_configured_to_ram()
 
 	def remove_stale_agent_cache(self, agent_name: str, new_hash: str):
 		pattern = os.path.join(self.cache_dir, f"{agent_name}_*.bin")
@@ -195,7 +202,8 @@ class PromptCacheManager:
 
 	def identify_agent_name(self, prompt_text: str) -> str:
 		prompt_hash = self.compute_hash(prompt_text)
-		for agent_name, text in DEFAULT_AGENT_PROMPTS.items():
+		prompts_dict = self.configured_prompts or DEFAULT_AGENT_PROMPTS
+		for agent_name, text in prompts_dict.items():
 			if self.compute_hash(text) == prompt_hash:
 				return agent_name
 		for agent_name, stored_hash in self.agent_hash_map.items():
@@ -233,7 +241,8 @@ class PromptCacheManager:
 			return
 
 		print("[PromptCache] Warming up default agent system prompt caches...")
-		for agent_name, prompt_text in DEFAULT_AGENT_PROMPTS.items():
+		prompts_to_warm = self.configured_prompts or DEFAULT_AGENT_PROMPTS
+		for agent_name, prompt_text in prompts_to_warm.items():
 			prompt_hash = self.compute_hash(prompt_text)
 			if prompt_hash in self.ram_cache:
 				continue

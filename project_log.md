@@ -1217,3 +1217,13 @@
 	- En `backend/prompt_cache.py`: se implementó `get_chat_formatted_system_prompt` para pre-evaluar cada prompt de agente con sus directrices de herramientas en el formato exacto de chat del modelo, indexado en RAM y disco por hash SHA-256.
 	- En `backend/engine.py`: `apply_cache_if_available` restaura directamente el estado KV cache con `load_state`, permitiendo a `llama.cpp` detectar coincidencia completa de prefijo (*prefix-match hit*) y omitir la evaluación del system prompt, iniciando la generación de respuesta en menos de 1 segundo.
 	- Verificado con test unitario en `LLM_Test/gemini/tests/test_clean_prompt_cache_reuse.py`.
+
+### 📝 Registro: [v0.9.27] - Carga selectiva a memoria RAM exclusivamente de los prompts configurados
+- **date-time**: 2026-10-24 09:10:00
+- **Problema**:
+	- `PromptCacheManager` cargaba indiscriminadamente a memoria RAM todos los archivos binarios (`*.bin`) encontrados en el directorio de caché, consumiendo memoria con estados obsoletos o huérfanos de prompts no configurados en el sistema.
+- **Causa**:
+	- El método `load_all_to_ram()` iteraba mediante `glob.glob("*.bin")` sobre todo archivo persistido en disco sin filtrar contra el conjunto de agentes y prompts configurados en `DEFAULT_AGENT_PROMPTS`.
+- **Solución**:
+	- En [`backend/prompt_cache.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/backend/prompt_cache.py): implementado `load_configured_to_ram()` recibiendo `configured_prompts` en el constructor, iterando estrictamente sobre los agentes activos y cargando en RAM exclusivamente los binarios cuyo hash coincide exactamente con la configuración actual. Todo binario huérfano o stale queda descartado sin residir en memoria RAM.
+	- Validados tests unitarios en `LLM_Test/gemini/engine/test_prompt_cache.py` y `LLM_Test/gemini/tests/test_clean_prompt_cache_reuse.py`.

@@ -1,6 +1,7 @@
 import os
 import sys
 import shutil
+import pickle
 
 sys.path.insert(0, os.path.abspath("."))
 
@@ -45,12 +46,22 @@ def test_cache_workflow():
 	assert os.path.exists(file_v2), f"New file {file_v2} must exist"
 	print("Step 3: Stale cache deleted and new hash saved.")
 
-	# 4. Simulate container restart (new manager instance loading from disk to RAM)
-	new_manager = PromptCacheManager(cache_dir=TEST_CACHE_DIR)
+	# 4. Simulate container restart (loading from disk to RAM only configured prompts)
+	# Create an orphan binary that is NOT in configured_prompts
+	orphan_file = os.path.join(TEST_CACHE_DIR, "orphan_agent_deadbeef12345678.bin")
+	with open(orphan_file, "wb") as f:
+		pickle.dump({"hash": "deadbeef12345678", "agent_name": "orphan_agent", "state": "mock_orphan"}, f)
+
+	# Manager configured ONLY with test_agent (prompt_v2)
+	new_manager = PromptCacheManager(
+		cache_dir=TEST_CACHE_DIR,
+		configured_prompts={"test_agent": prompt_v2}
+	)
 	restored_state = new_manager.get_cached_state_by_hash(hash_v2)
 	assert restored_state == dummy_state_v2, "Restored state after restart must match v2"
 	assert new_manager.get_cached_state_by_hash(hash_v1) is None, "Old hash must not be loaded"
-	print("Step 4: Container restart loaded all binary caches to RAM.")
+	assert new_manager.get_cached_state_by_hash("deadbeef12345678") is None, "Unconfigured orphan binary must NOT be loaded to RAM"
+	print("Step 4: Only configured prompt caches loaded into RAM, unconfigured binaries ignored.")
 
 	# 5. Test caller context snapshot stack during sub-agent delegation
 	caller_dummy_state = {"caller_tokens": [1, 2, 3], "kv_mem": b"caller_active_kv"}
