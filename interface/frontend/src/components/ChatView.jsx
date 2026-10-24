@@ -22,6 +22,13 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	const [audioLoadingIndex, setAudioLoadingIndex] = useState(null)
 	const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false)
 	const [openMetricsIndices, setOpenMetricsIndices] = useState({})
+	const [modelStatus, setModelStatus] = useState("Procesando consulta")
+
+	const formatThreeWords = (text) => {
+		if (!text) return "Procesando consulta"
+		const words = text.trim().split(/\s+/)
+		return words.slice(0, 3).join(" ")
+	}
 
 	const handleNewChat = () => {
 		stopStreamingAudio()
@@ -240,6 +247,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 		setMessages(newHistory)
 		setInput("")
 		setIsLoading(true)
+		setModelStatus("Procesando consulta")
 
 		try {
 			const turnId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 7)
@@ -263,6 +271,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 					const data = JSON.parse(event.data)
 					if (data.type === "metric") {
 						if (data.stage === "model_load") {
+							setModelStatus("Cargando modelo")
 							currentModelMetrics = {
 								model: data.model,
 								load_time_seconds: data.load_time_seconds,
@@ -270,6 +279,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								details: data.details
 							}
 						} else if (data.stage === "kv_cache") {
+							setModelStatus("Restaurando memoria")
 							currentKvMetrics = {
 								restore_time_seconds: data.restore_time_seconds,
 								ram_mb: data.ram_mb,
@@ -277,12 +287,25 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								details: data.details
 							}
 						} else if (data.stage === "prompt_execution") {
+							setModelStatus("Evaluando prompt")
 							currentPromptMetrics = {
 								tokens: data.tokens,
 								duration_seconds: data.duration_seconds,
 								tokens_per_second: data.tokens_per_second
 							}
 						} else if (data.stage === "tool_execution") {
+							const tName = (data.tool || "").toLowerCase()
+							if (tName.includes("search")) {
+								setModelStatus("Buscando en web")
+							} else if (tName.includes("url") || tName.includes("read")) {
+								setModelStatus("Leyendo página web")
+							} else if (tName.includes("pdf")) {
+								setModelStatus("Analizando archivo PDF")
+							} else if (tName.includes("researcher") || tName.includes("agent")) {
+								setModelStatus("Consultando subagente")
+							} else {
+								setModelStatus("Ejecutando herramienta")
+							}
 							currentToolsMetrics = [
 								...currentToolsMetrics,
 								{
@@ -296,6 +319,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								}
 							]
 						} else if (data.stage === "sub_agent") {
+							setModelStatus("Consultando subagente")
 							currentSubAgentsMetrics = [
 								...currentSubAgentsMetrics,
 								{
@@ -315,6 +339,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								}
 							]
 						} else if (data.stage === "generation_metrics") {
+							setModelStatus("Generando respuesta")
 							currentGenMetrics = {
 								tokens: data.tokens,
 								duration_seconds: data.duration_seconds,
@@ -391,7 +416,24 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 			ws.onmessage = (event) => {
 				try {
 					const data = JSON.parse(event.data)
-					if (data.type === "token" && data.token) {
+					if (data.type === "status" && data.status) {
+						setModelStatus(data.status)
+					} else if (data.type === "thinking_token") {
+						setModelStatus("Razonando respuesta")
+					} else if (data.type === "assistant_status" && data.status) {
+						const rawStatus = data.status || ""
+						if (rawStatus.toLowerCase().includes("buscando")) {
+							setModelStatus("Buscando en web")
+						} else if (rawStatus.toLowerCase().includes("leyendo")) {
+							setModelStatus("Leyendo página web")
+						} else if (rawStatus.toLowerCase().includes("pdf") || rawStatus.toLowerCase().includes("analizando")) {
+							setModelStatus("Analizando archivo PDF")
+						} else {
+							const words = rawStatus.trim().split(/\s+/)
+							setModelStatus(words.slice(0, 3).join(" "))
+						}
+					} else if (data.type === "token" && data.token) {
+						setModelStatus("Generando respuesta")
 						accumulatedText += data.token
 						setMessages((prev) => {
 							const last = prev[prev.length - 1]
@@ -751,12 +793,25 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 									: "bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none"
 							}`}
 						>
-							<p className="text-sm leading-relaxed whitespace-pre-wrap">
-								{msg.content}
-								{isLoading && index === messages.length - 1 && msg.role === "assistant" && (
-									<span className="inline-block w-1.5 h-4 ml-1 bg-sky-400 animate-pulse align-middle" />
-								)}
-							</p>
+							{!msg.content && isLoading && index === messages.length - 1 ? (
+								<div className="flex flex-col gap-1.5 py-0.5">
+									<div className="flex items-center gap-2">
+										<Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+										<span className="text-xs font-medium text-slate-300">Thinking...</span>
+									</div>
+									<div className="text-[11px] text-sky-400 font-medium tracking-wide flex items-center gap-1.5 pl-5">
+										<span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+										<span>{formatThreeWords(modelStatus)}</span>
+									</div>
+								</div>
+							) : (
+								<p className="text-sm leading-relaxed whitespace-pre-wrap">
+									{msg.content}
+									{isLoading && index === messages.length - 1 && msg.role === "assistant" && (
+										<span className="inline-block w-1.5 h-4 ml-1 bg-sky-400 animate-pulse align-middle" />
+									)}
+								</p>
+							)}
 
 							{msg.role === "assistant" && (
 								<div className="mt-2.5 pt-2 border-t border-slate-800/80 flex flex-col gap-2">
@@ -1085,13 +1140,19 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 				))}
 
 				{isLoading && (!messages.length || messages[messages.length - 1].role === "user") && (
-					<div className="flex items-center gap-3">
-						<div className="w-8 h-8 rounded-full bg-sky-600/20 border border-sky-500/40 flex items-center justify-center text-sky-400">
+					<div className="flex items-start gap-3">
+						<div className="w-8 h-8 rounded-full bg-sky-600/20 border border-sky-500/40 flex items-center justify-center text-sky-400 mt-0.5">
 							<Bot className="w-4 h-4" />
 						</div>
-						<div className="bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 flex items-center gap-2">
-							<Loader2 className="w-4 h-4 animate-spin text-sky-400" />
-							<span className="text-xs text-slate-400">Thinking...</span>
+						<div className="bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 flex flex-col gap-1.5 shadow-md">
+							<div className="flex items-center gap-2">
+								<Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+								<span className="text-xs font-medium text-slate-300">Thinking...</span>
+							</div>
+							<div className="text-[11px] text-sky-400 font-medium tracking-wide flex items-center gap-1.5 pl-6">
+								<span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+								<span>{formatThreeWords(modelStatus)}</span>
+							</div>
 						</div>
 					</div>
 				)}

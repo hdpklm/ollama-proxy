@@ -1239,3 +1239,14 @@
 	- `interface/backend/routes/call_ws.py`: El mensaje de finalización `done` emite directamente los objetos completos `model_metrics`, `kv_metrics`, `prompt_metrics` y `generation_metrics` con valores estrictamente actuales del turno.
 	- `interface/backend/routes/chat.py`: Se incorporó `t_turn_start = time.time()` y se inyectaron todas las métricas actuales del turno (`total_turn_seconds`, `model_metrics`, `kv_metrics`, `prompt_metrics`, `generation_metrics`) en la respuesta REST.
 	- `backend/routes.py` y `interface/backend/services/llm_client.py`: Asegurado que los modelos en RAM reporten `load_time_seconds: 0.0` para turnos activos en memoria.
+
+### 📝 Registro: [v0.9.29] - Indicador de acción en tiempo real bajo 'Thinking...' (máximo 3 palabras)
+- **date-time**: 2026-10-24 09:29:30
+- **Problema**:
+	- Cuando el usuario enviaba un mensaje, la interfaz mostraba únicamente "Thinking..." estático sin informar qué operación estaba ejecutando internamente el modelo en cada instante.
+- **Causa**:
+	- El bloque indicador de carga en `ChatView.jsx` no mostraba subtítulo de estado ni suscribía los eventos dinámicos de etapa del turno antes de recibir el primer token.
+- **Solución**:
+	- `interface/frontend/src/components/ChatView.jsx`: Se añadió el estado reactivo `modelStatus` con la función normalizadora `formatThreeWords` que restringe el texto a un máximo estricto de 3 palabras.
+	- Se integró visualmente en primera fila justo debajo de "Thinking..." mediante un badge con punto pulsante (`bg-sky-400 animate-pulse`) que informa en vivo la acción del modelo (`"Cargando modelo"`, `"Restaurando memoria"`, `"Evaluando prompt"`, `"Buscando en web"`, `"Leyendo página web"`, `"Ejecutando herramienta"`, `"Consultando subagente"`, `"Razonando respuesta"`, `"Generando respuesta"`).
+	- `interface/backend/routes/call_ws.py`: Se incorporó la emisión inmediata de eventos `{"type": "status", "status": ...}` a través del socket de chat en cada transición de etapa (carga de modelo, restauración KV, evaluación de prompt y ejecución de herramientas).

@@ -532,6 +532,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 
 		# 1. Emit model load metric to WebSocket 2 (No-streaming)
 		try:
+			await websocket.send_json({"type": "status", "status": "Cargando modelo"})
 			model_info = await llm_service.get_model_info(model)
 			is_in_mem = model_info.get("in_memory", True)
 			current_load_time = 0.0 if is_in_mem else model_info.get("load_time_seconds", 0.0)
@@ -548,6 +549,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 
 		# 2. Emit session & KV cache metric to WebSocket 2 (No-streaming)
 		try:
+			await websocket.send_json({"type": "status", "status": "Restaurando memoria"})
 			sys_msg = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
 			cached_tokens = len(sys_msg) // 4 if sys_msg else 0
 			kv_ram = round(cached_tokens * 0.125, 2)
@@ -571,6 +573,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 			is_thinking_block = False
 
 			try:
+				await websocket.send_json({"type": "status", "status": "Evaluando prompt"})
 				async for chunk in llm_service.stream_chat(messages, model=model, tools=profile_tools if (step == 0 and profile_tools) else None, priority=priority, fast=fast):
 					if isinstance(chunk, dict):
 						if "tool_calls" in chunk:
@@ -643,6 +646,8 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 					for tc in tool_calls:
 						silence_status = format_silence_killer_status(tc.name, tc.args)
 						await websocket.send_json({"type": "assistant_status", "status": silence_status})
+						tool_status_text = "Buscando en web" if "search" in tc.name else ("Consultando subagente" if "researcher" in tc.name or "agent" in tc.name else "Ejecutando herramienta")
+						await websocket.send_json({"type": "status", "status": tool_status_text})
 						import time
 						t_tool_start = time.time()
 						req_str = json.dumps({"tool": tc.name, "arguments": tc.args}, ensure_ascii=False)
