@@ -631,14 +631,17 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 						for sentence in chunker.push_token(token):
 							chunk_index += 1
 							if tts_mode == "rpi5":
-								audio_bytes = await tts_service.synthesize(sentence)
-								if audio_bytes:
-									await websocket.send_json({
-										"type": "audio_chunk",
-										"chunk_index": chunk_index,
-										"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
-										"text": sentence
-									})
+								try:
+									audio_bytes = await tts_service.synthesize(sentence)
+									if audio_bytes:
+										await websocket.send_json({
+											"type": "audio_chunk",
+											"chunk_index": chunk_index,
+											"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+											"text": sentence
+										})
+								except Exception as e_tts:
+									print(f"[WS Chat] Warning: TTS streaming failed: {e_tts}")
 							elif tts_mode == "browser":
 								await websocket.send_json({"type": "tts_sentence", "chunk_index": chunk_index, "text": sentence})
 
@@ -711,14 +714,17 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 					for sentence in chunker.flush():
 						chunk_index += 1
 						if tts_mode == "rpi5":
-							audio_bytes = await tts_service.synthesize(sentence)
-							if audio_bytes:
-								await websocket.send_json({
-									"type": "audio_chunk",
-									"chunk_index": chunk_index,
-									"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
-									"text": sentence
-								})
+							try:
+								audio_bytes = await tts_service.synthesize(sentence)
+								if audio_bytes:
+									await websocket.send_json({
+										"type": "audio_chunk",
+										"chunk_index": chunk_index,
+										"audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+										"text": sentence
+									})
+							except Exception as e_tts_flush:
+								print(f"[WS Chat] Warning: TTS flush failed: {e_tts_flush}")
 						else:
 							await websocket.send_json({"type": "tts_sentence", "chunk_index": chunk_index, "text": sentence})
 

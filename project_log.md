@@ -1325,3 +1325,15 @@
 		- En `load_configured_to_ram`, se invalidan binarios obsoletos con tokens residuales.
 	- En `backend/engine.py`:
 		- Se acumula el texto del asistente a lo largo del stream y se guarda el estado completo con `save_or_replace_temporal_cache` al finalizar el stream (`finally`), permitiendo coincidencia de 100% de tokens en los turnos sucesivos.
+
+### 📝 Registro: [v0.9.36] - Tolerancia a fallos de conexión TTS en streaming de chat
+- **date-time**: 2026-10-24 16:12:00
+- **Problema**:
+	- Al enviar un mensaje en el chat aparecía el error `All connection attempts failed` (o `all conversation attempt failed`) interrumpiendo la conversación.
+- **Causa**:
+	- En `interface/backend/services/tts_client.py`, la llamada fallback `GET /api/tts` se encontraba fuera del bloque `try/except`. Cuando el servicio de audio (`piper-tts`) no estaba disponible o estaba detenido, `httpx` lanzaba `ConnectError: All connection attempts failed`.
+	- En `interface/backend/routes/call_ws.py`, las llamadas a `tts_service.synthesize` en `chunker.push_token` y `chunker.flush` no capturaban este fallo, propagando la excepción hasta la raíz del WebSocket del chat y abortando la emisión de texto al cliente.
+- **Solución**:
+	- En `interface/backend/services/tts_client.py`: Envolver la síntesis completa en un bloque `try/except` seguro con timeout acotado (5.0s), devolviendo `b""` en caso de indisponibilidad del servicio TTS.
+	- En `interface/backend/routes/call_ws.py`: Proteger las llamadas a síntesis en streaming y flush con `try/except`, permitiendo que el flujo de texto continúe sin interrupciones aunque el sintetizador de audio no esté activo.
+	- Contenedor `interface` reiniciado y validado mediante `test_tts_resilience.py`.
