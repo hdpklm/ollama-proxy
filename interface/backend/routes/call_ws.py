@@ -550,7 +550,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 
 		# 2. Emit session & KV cache metric to WebSocket 2 (No-streaming)
 		try:
-			await websocket.send_json({"type": "status", "status": "Restaurando memoria"})
+			await websocket.send_json({"type": "status", "status": "Montando cache"})
 			sys_msg = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
 			cached_tokens = len(sys_msg) // 4 if sys_msg else 0
 			kv_ram = round(cached_tokens * 0.125, 2)
@@ -580,6 +580,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 						if "tool_calls" in chunk:
 							accumulated_tool_calls.extend(chunk["tool_calls"])
 						if "reasoning_content" in chunk:
+							await websocket.send_json({"type": "status", "status": "Razonando respuesta"})
 							await websocket.send_json({
 								"type": "thinking_token",
 								"token": chunk["reasoning_content"]
@@ -606,6 +607,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 					if "<think" in token or "<thought" in token or "<|thought" in token:
 						is_thinking_block = True
 					if is_thinking_block:
+						await websocket.send_json({"type": "status", "status": "Razonando respuesta"})
 						await websocket.send_json({
 							"type": "thinking_token",
 							"token": token
@@ -620,7 +622,9 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 							break
 						continue
 
-					is_streaming = True
+					if not is_streaming:
+						is_streaming = True
+						await websocket.send_json({"type": "status", "status": "Generando respuesta"})
 					# WebSocket 1: Ultra-fast streaming ONLY (tokens and audio chunks)
 					await websocket.send_json({"type": "token", "token": token})
 					for sentence in chunker.push_token(token):

@@ -22,10 +22,34 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 	const [audioLoadingIndex, setAudioLoadingIndex] = useState(null)
 	const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false)
 	const [openMetricsIndices, setOpenMetricsIndices] = useState({})
-	const [modelStatus, setModelStatus] = useState("Procesando consulta")
+	const [modelStatus, setModelStatus] = useState("Cargando modelo")
+	const [stepElapsedSeconds, setStepElapsedSeconds] = useState("0.0")
+	const stepStartTimeRef = useRef(Date.now())
+
+	const updateModelStatus = (statusText) => {
+		if (!statusText) return
+		stepStartTimeRef.current = Date.now()
+		setStepElapsedSeconds("0.0")
+		setModelStatus(statusText)
+	}
+
+	useEffect(() => {
+		let interval = null
+		if (isLoading) {
+			interval = setInterval(() => {
+				const elapsed = ((Date.now() - stepStartTimeRef.current) / 1000).toFixed(1)
+				setStepElapsedSeconds(elapsed)
+			}, 100)
+		} else {
+			setStepElapsedSeconds("0.0")
+		}
+		return () => {
+			if (interval) clearInterval(interval)
+		}
+	}, [isLoading, modelStatus])
 
 	const formatThreeWords = (text) => {
-		if (!text) return "Procesando consulta"
+		if (!text) return "Cargando modelo"
 		const words = text.trim().split(/\s+/)
 		return words.slice(0, 3).join(" ")
 	}
@@ -247,7 +271,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 		setMessages(newHistory)
 		setInput("")
 		setIsLoading(true)
-		setModelStatus("Procesando consulta")
+		updateModelStatus("Cargando modelo")
 
 		try {
 			const turnId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 7)
@@ -271,7 +295,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 					const data = JSON.parse(event.data)
 					if (data.type === "metric") {
 						if (data.stage === "model_load") {
-							setModelStatus("Cargando modelo")
+							updateModelStatus("Cargando modelo")
 							currentModelMetrics = {
 								model: data.model,
 								load_time_seconds: data.load_time_seconds,
@@ -279,7 +303,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								details: data.details
 							}
 						} else if (data.stage === "kv_cache") {
-							setModelStatus("Restaurando memoria")
+							updateModelStatus("Montando cache")
 							currentKvMetrics = {
 								restore_time_seconds: data.restore_time_seconds,
 								ram_mb: data.ram_mb,
@@ -287,7 +311,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								details: data.details
 							}
 						} else if (data.stage === "prompt_execution") {
-							setModelStatus("Evaluando prompt")
+							updateModelStatus("Evaluando prompt")
 							currentPromptMetrics = {
 								tokens: data.tokens,
 								duration_seconds: data.duration_seconds,
@@ -296,15 +320,15 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 						} else if (data.stage === "tool_execution") {
 							const tName = (data.tool || "").toLowerCase()
 							if (tName.includes("search")) {
-								setModelStatus("Buscando en web")
+								updateModelStatus("Buscando en web")
 							} else if (tName.includes("url") || tName.includes("read")) {
-								setModelStatus("Leyendo página web")
+								updateModelStatus("Leyendo página web")
 							} else if (tName.includes("pdf")) {
-								setModelStatus("Analizando archivo PDF")
+								updateModelStatus("Analizando archivo PDF")
 							} else if (tName.includes("researcher") || tName.includes("agent")) {
-								setModelStatus("Consultando subagente")
+								updateModelStatus("Consultando subagente")
 							} else {
-								setModelStatus("Ejecutando herramienta")
+								updateModelStatus("Ejecutando herramienta")
 							}
 							currentToolsMetrics = [
 								...currentToolsMetrics,
@@ -319,7 +343,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								}
 							]
 						} else if (data.stage === "sub_agent") {
-							setModelStatus("Consultando subagente")
+							updateModelStatus("Consultando subagente")
 							currentSubAgentsMetrics = [
 								...currentSubAgentsMetrics,
 								{
@@ -339,7 +363,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								}
 							]
 						} else if (data.stage === "generation_metrics") {
-							setModelStatus("Generando respuesta")
+							updateModelStatus("Generando respuesta")
 							currentGenMetrics = {
 								tokens: data.tokens,
 								duration_seconds: data.duration_seconds,
@@ -417,23 +441,23 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 				try {
 					const data = JSON.parse(event.data)
 					if (data.type === "status" && data.status) {
-						setModelStatus(data.status)
+						updateModelStatus(data.status)
 					} else if (data.type === "thinking_token") {
-						setModelStatus("Razonando respuesta")
+						updateModelStatus("Razonando respuesta")
 					} else if (data.type === "assistant_status" && data.status) {
 						const rawStatus = data.status || ""
 						if (rawStatus.toLowerCase().includes("buscando")) {
-							setModelStatus("Buscando en web")
+							updateModelStatus("Buscando en web")
 						} else if (rawStatus.toLowerCase().includes("leyendo")) {
-							setModelStatus("Leyendo página web")
+							updateModelStatus("Leyendo página web")
 						} else if (rawStatus.toLowerCase().includes("pdf") || rawStatus.toLowerCase().includes("analizando")) {
-							setModelStatus("Analizando archivo PDF")
+							updateModelStatus("Analizando archivo PDF")
 						} else {
 							const words = rawStatus.trim().split(/\s+/)
-							setModelStatus(words.slice(0, 3).join(" "))
+							updateModelStatus(words.slice(0, 3).join(" "))
 						}
 					} else if (data.type === "token" && data.token) {
-						setModelStatus("Generando respuesta")
+						updateModelStatus("Generando respuesta")
 						accumulatedText += data.token
 						setMessages((prev) => {
 							const last = prev[prev.length - 1]
@@ -802,6 +826,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 									<div className="text-[11px] text-sky-400 font-medium tracking-wide flex items-center gap-1.5 pl-5">
 										<span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
 										<span>{formatThreeWords(modelStatus)}</span>
+										<span className="text-[10px] text-slate-400 font-mono font-normal">({stepElapsedSeconds}s)</span>
 									</div>
 								</div>
 							) : (
@@ -1152,6 +1177,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 							<div className="text-[11px] text-sky-400 font-medium tracking-wide flex items-center gap-1.5 pl-6">
 								<span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
 								<span>{formatThreeWords(modelStatus)}</span>
+								<span className="text-[10px] text-slate-400 font-mono font-normal">({stepElapsedSeconds}s)</span>
 							</div>
 						</div>
 					</div>

@@ -273,26 +273,6 @@ class PromptCacheManager:
 				return True
 			except Exception as e:
 				print(f"[PromptCache] Error loading cached state for hash {prompt_hash}: {e}")
-
-		# If not cached yet, evaluate and save
-		agent_name = self.identify_agent_name(prompt_text)
-		try:
-			if hasattr(llm, "reset"):
-				llm.reset()
-			formatted_sys = self.get_chat_formatted_system_prompt(llm, prompt_text)
-			if formatted_sys and hasattr(llm, "tokenize"):
-				tokens = llm.tokenize(formatted_sys.encode("utf-8"), add_bos=False)
-			else:
-				tokens = llm.tokenize(prompt_text.encode("utf-8")) if hasattr(llm, "tokenize") else []
-
-			if tokens and hasattr(llm, "eval"):
-				llm.eval(tokens)
-			if hasattr(llm, "save_state"):
-				state = llm.save_state()
-				self.save_cache(agent_name, prompt_text, state, tokens)
-				return True
-		except Exception as e:
-			print(f"[PromptCache] Error caching new prompt for '{agent_name}': {e}")
 		return False
 
 	def get_memory_breakdown(self) -> dict:

@@ -1262,3 +1262,14 @@
 	- `interface/backend/routes/call_ws.py`: Se importó `import time` en la cabecera del módulo y se eliminó la importación local redundante dentro del bucle de herramientas.
 	- `interface/backend/routes/chat.py` y `interface/backend/services/sub_agents.py`: Se aseguró `import time` a nivel global en todos los módulos de endpoints y servicios relacionados.
 	- Validada la sintaxis con `py_compile` y tests de verificación ejecutados con éxito.
+
+### 📝 Registro: [v0.9.31] - Accion especifica con cronometro en vivo debajo de Thinking y eliminacion de doble evaluacion de prompt
+- **date-time**: 2026-10-24 09:52:00
+- **Problema**:
+	- El estado mostrado debajo del indicador "Thinking..." usaba textos genéricos o desactualizados ("Restaurando memoria", "Procesando consulta") sin permitir saber qué etapa estaba en ejecución ni cuánto tiempo exacto tomaba cada fase. Además, el tiempo de respuesta aumentó de ~3 segundos a ~30 segundos por turno en Raspberry Pi 5.
+- **Causa**:
+	- En `backend/prompt_cache.py`, el método `apply_cache_if_available` ejecutaba `llm.eval(tokens)` sincrónicamente cuando el cache no estaba listo en RAM (~15s en CPU ARM64), tras lo cual `llm.create_chat_completion(...)` detectaba un desfase de prefijo al incluir tools/jinja templates y forzaba un segundo `eval` completo (~15s adicionales), duplicando la evaluación a 30s. Por su parte, la interfaz no enviaba transiciones claras ni disponía de un cronómetro en tiempo real por etapa.
+- **Solución**:
+	- En `backend/prompt_cache.py`: Modificado `apply_cache_if_available` para restaurar directamente `llm.load_state(cached_state)` si existe en RAM, y omitir llamadas síncronas a `llm.eval(tokens)` en tiempo de inferencia, dejando que `create_chat_completion` evalúe el prompt una única vez y eliminando de raíz la duplicación de latencia.
+	- En `interface/backend/routes/call_ws.py`: Ajustados los mensajes de estado en tiempo real vía WebSocket a `"Cargando modelo"`, `"Montando cache"`, `"Evaluando prompt"`, `"Razonando respuesta"`, `"Ejecutando herramienta"` y `"Generando respuesta"`.
+	- En `interface/frontend/src/components/ChatView.jsx`: Incorporado un cronómetro en tiempo real `(Xs)` al lado del estado del modelo debajo de "Thinking...", el cual se reinicia en cada cambio de fase, permitiendo al usuario visualizar con total precisión qué fase está activa y cuántos segundos consume.
