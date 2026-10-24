@@ -405,14 +405,21 @@ class PromptCacheManager:
 		for entry in candidates:
 			cached_tokens = entry.get("tokens") or []
 			c_len = len(cached_tokens)
-			if c_len == 0 or c_len > len(request_tokens):
+			if c_len == 0:
 				continue
 
-			# Verify all tokens of cached entry match the prefix of request_tokens
-			if request_tokens[:c_len] == cached_tokens:
-				if c_len > max_matched_len:
-					max_matched_len = c_len
-					best_cache = entry
+			prefix_match = 0
+			while prefix_match < min(c_len, len(request_tokens)) and cached_tokens[prefix_match] == request_tokens[prefix_match]:
+				prefix_match += 1
+
+			name = entry.get("agent_name") or entry.get("cache_id")
+			print(f"[Prefix Debug] Candidate '{name}': cached_len={c_len}, req_len={len(request_tokens)}, matched={prefix_match}/{c_len}", flush=True)
+
+			# Match if all cached tokens match prefix, or all except up to 4 trailing turn/role delimiter tokens
+			is_match = (prefix_match == c_len) or (c_len > 16 and prefix_match >= c_len - 4)
+			if is_match and prefix_match > max_matched_len:
+				max_matched_len = prefix_match
+				best_cache = entry
 
 		return best_cache
 

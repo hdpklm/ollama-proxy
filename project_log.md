@@ -1299,3 +1299,13 @@
 	- Implementado reemplazo in-place del caché temporal utilizado cuando todos sus tokens coinciden con el prefijo enviado, permitiendo que las conversaciones evolucionen a ~2.0s por turno sin duplicar memoria.
 	- `backend/engine.py`: Integrada la búsqueda de prefijo en `create_stream` y el generador `_wrap_stream_with_cache_update` para guardar/reemplazar el estado del KV cache justo al emitir el primer token.
 	- Verificado con test multi-turno: Turn 1 (2.07s), Turn 2 (2.02s) y Turn 3 (2.04s).
+
+### 📝 Registro: [v0.9.34] - Tolerancia de Delimitadores de Turno en Match de Prefijo KV Cache
+- **date-time**: 2026-10-24 12:12:55
+- **Problema**:
+	- En el primer turno de inferencia con herramientas, el prefijo del prompt de la petición coincidía en 946 de los 948 tokens del system prompt precalentado (`[Prefix Debug] Candidate 'main_agent': cached_len=948, req_len=987, matched=946/948`). Al exigir igualdad estricta de tokens (`matched == c_len`), fallaba por una discrepancia de 2 tokens en los delimitadores de rol finales (`<start_of_turn>model`), provocando reevaluación completa de 25 segundos.
+- **Causa**:
+	- Las plantillas de chat inyectan delimitadores de rol al final del bloque del sistema que varían ligeramente cuando el sistema va seguido de un turno de usuario (`<start_of_turn>user`) versus cuando está aislado.
+- **Solución**:
+	- `backend/prompt_cache.py`: Actualizada la condición de `find_best_matching_cache` para aceptar coincidencias donde `prefix_match >= c_len - 4` en cachés de más de 16 tokens (`is_match = (prefix_match == c_len) or (c_len > 16 and prefix_match >= c_len - 4)`).
+	- Verificado: El LLM reutiliza los 946 tokens del KV cache (`[Engine Cache] Request tokens: 987, Applied cache: True, Matched prefix: 948 tokens`), activando el caché tanto en el primer turno como en los turnos sucesivos con herramientas.
