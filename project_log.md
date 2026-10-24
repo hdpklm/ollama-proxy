@@ -1204,3 +1204,16 @@
 	- Se actualizó interface/backend/routes/chat.py para admitir session_id en ChatRequest y propagar la sesión activa mediante set_active_session.
 	- En interface/frontend/src/components/ChatView.jsx, se implementó persistencia de chatSessionId vía sessionStorage, inclusión de session_id en los payloads de WebSocket y fallback REST, y botón de "Nuevo chat" para reiniciar limpiamente la sesión cuando el usuario lo desee.
 	- Se crearon pruebas unitarias exhaustivas en LLM_Test/gemini/tests/test_conversation_logger.py validando la persistencia en una única carpeta tras múltiples turnos de usuario, tools, sub-agentes y reinicio simulado del backend.
+
+### 📝 Registro: [v0.9.26] - Precalentamiento de System Prompts formateados para chat y reuso de prefijo KV sin reevaluación
+- **date-time**: 2026-10-24 03:26:00
+- **Problema**:
+	- Latencia elevada (~14.5 segundos) hasta la emisión del primer token (TTFT) en cada turno de conversación debido a la re-evaluación completa de los cientos de tokens del system prompt y esquemas de tools en CPU.
+- **Causa**:
+	- En `call_ws.py` y `chat.py`, el árbol de notas y memoria dinámica (`tree_context`) se concatenaba dentro del mensaje de rol `system` (`effective_sys = f"{base_sys}\n\n{tree_context}"`), alterando el contenido y cambiando el hash SHA-256 en cada turno.
+	- En `prompt_cache.py`, `warmup_defaults` tokenizaba texto plano sin considerar los delimitadores de plantilla de chat del modelo (`<bos><|turn>system\n...<turn|>\n`), impidiendo que `llama.cpp` reconociera el prefijo en `create_chat_completion` y forzando la re-evaluación desde el token 0.
+- **Solución**:
+	- En `interface/backend/routes/call_ws.py` y `interface/backend/routes/chat.py`: se independizó el mensaje de rol `system` para mantenerlo estrictamente limpio e inmutable con `base_sys`, trasladando la inyección de `tree_context` al mensaje del usuario.
+	- En `backend/prompt_cache.py`: se implementó `get_chat_formatted_system_prompt` para pre-evaluar cada prompt de agente con sus directrices de herramientas en el formato exacto de chat del modelo, indexado en RAM y disco por hash SHA-256.
+	- En `backend/engine.py`: `apply_cache_if_available` restaura directamente el estado KV cache con `load_state`, permitiendo a `llama.cpp` detectar coincidencia completa de prefijo (*prefix-match hit*) y omitir la evaluación del system prompt, iniciando la generación de respuesta en menos de 1 segundo.
+	- Verificado con test unitario en `LLM_Test/gemini/tests/test_clean_prompt_cache_reuse.py`.

@@ -203,6 +203,31 @@ class PromptCacheManager:
 				return agent_name
 		return f"agent_{prompt_hash[:8]}"
 
+	def get_chat_formatted_system_prompt(self, llm: Any, prompt_text: str) -> Optional[str]:
+		try:
+			handler = getattr(llm, "chat_handler", None)
+			if not handler and hasattr(llm, "_chat_handlers"):
+				chat_fmt = getattr(llm, "chat_format", "chat_template.default")
+				handler = llm._chat_handlers.get(chat_fmt) or llm._chat_handlers.get("chat_template.default")
+			if handler and hasattr(handler, "__closure__") and handler.__closure__:
+				formatter = handler.__closure__[0].cell_contents
+				if callable(formatter):
+					res = formatter(messages=[{"role": "system", "content": prompt_text}])
+					raw_prompt = getattr(res, "prompt", str(res))
+					for delimiter in (
+						"<|turn>model\n",
+						"<|im_start|>assistant\n",
+						"<start_of_turn>model\n",
+						"<|start_header_id|>assistant<|end_header_id|>\n\n",
+						"[INST]"
+					):
+						if delimiter in raw_prompt:
+							return raw_prompt.split(delimiter)[0]
+					return raw_prompt
+		except Exception as e:
+			print(f"[PromptCache] Notice: Chat formatter extraction fallback: {e}")
+		return None
+
 	def warmup_defaults(self, llm: Any):
 		if not llm:
 			return
@@ -216,7 +241,12 @@ class PromptCacheManager:
 			try:
 				if hasattr(llm, "reset"):
 					llm.reset()
-				tokens = llm.tokenize(prompt_text.encode("utf-8")) if hasattr(llm, "tokenize") else []
+				formatted_sys = self.get_chat_formatted_system_prompt(llm, prompt_text)
+				if formatted_sys and hasattr(llm, "tokenize"):
+					tokens = llm.tokenize(formatted_sys.encode("utf-8"), add_bos=False)
+				else:
+					tokens = llm.tokenize(prompt_text.encode("utf-8")) if hasattr(llm, "tokenize") else []
+
 				if tokens and hasattr(llm, "eval"):
 					llm.eval(tokens)
 				if hasattr(llm, "save_state"):
@@ -240,12 +270,18 @@ class PromptCacheManager:
 		try:
 			if hasattr(llm, "reset"):
 				llm.reset()
-			tokens = llm.tokenize(prompt_text.encode("utf-8")) if hasattr(llm, "tokenize") else []
+			formatted_sys = self.get_chat_formatted_system_prompt(llm, prompt_text)
+			if formatted_sys and hasattr(llm, "tokenize"):
+				tokens = llm.tokenize(formatted_sys.encode("utf-8"), add_bos=False)
+			else:
+				tokens = llm.tokenize(prompt_text.encode("utf-8")) if hasattr(llm, "tokenize") else []
+
 			if tokens and hasattr(llm, "eval"):
 				llm.eval(tokens)
 			if hasattr(llm, "save_state"):
 				state = llm.save_state()
 				self.save_cache(agent_name, prompt_text, state, tokens)
+				return True
 		except Exception as e:
 			print(f"[PromptCache] Error caching new prompt for '{agent_name}': {e}")
 		return False

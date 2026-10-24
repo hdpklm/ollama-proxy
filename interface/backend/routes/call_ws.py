@@ -914,20 +914,20 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 							messages.append(m)
 
 					base_sys = load_default_system_prompt()
-					if tree_context:
-						effective_sys = f"{base_sys}\n\n{tree_context}"
-					else:
-						effective_sys = base_sys
-
-					# Replace or inject system prompt with tree context
 					has_sys = False
 					for m in messages:
 						if m.get("role") == "system":
-							m["content"] = effective_sys
+							m["content"] = base_sys
 							has_sys = True
 							break
 					if not has_sys:
-						messages.insert(0, {"role": "system", "content": effective_sys})
+						messages.insert(0, {"role": "system", "content": base_sys})
+
+					if tree_context:
+						for m in reversed(messages):
+							if m.get("role") == "user":
+								m["content"] = f"[Contexto de memoria activo:\n{tree_context}]\n\n{m['content']}"
+								break
 
 					current_stream_task = asyncio.create_task(
 						stream_tokens(

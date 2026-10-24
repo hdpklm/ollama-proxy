@@ -128,15 +128,20 @@ async def handle_chat(req: ChatRequest):
 				messages.append(m)
 
 		base_sys = load_default_system_prompt()
-		effective_sys = f"{base_sys}\n\n{tree_context}" if tree_context else base_sys
 		has_sys = False
 		for m in messages:
 			if m.get("role") == "system":
-				m["content"] = effective_sys
+				m["content"] = base_sys
 				has_sys = True
 				break
 		if not has_sys:
-			messages.insert(0, {"role": "system", "content": effective_sys})
+			messages.insert(0, {"role": "system", "content": base_sys})
+
+		if tree_context:
+			for m in reversed(messages):
+				if m.get("role") == "user":
+					m["content"] = f"[Contexto de memoria activo:\n{tree_context}]\n\n{m['content']}"
+					break
 
 		from services.agent_manager import load_agent_profile
 		from services.tool_definitions import get_tools_for_agent
