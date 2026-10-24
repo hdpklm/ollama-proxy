@@ -1337,3 +1337,17 @@
 	- En `interface/backend/services/tts_client.py`: Envolver la síntesis completa en un bloque `try/except` seguro con timeout acotado (5.0s), devolviendo `b""` en caso de indisponibilidad del servicio TTS.
 	- En `interface/backend/routes/call_ws.py`: Proteger las llamadas a síntesis en streaming y flush con `try/except`, permitiendo que el flujo de texto continúe sin interrupciones aunque el sintetizador de audio no esté activo.
 	- Contenedor `interface` reiniciado y validado mediante `test_tts_resilience.py`.
+
+### 📝 Registro: [v0.9.37] - Corrección de coincidencia del 100% de KV Cache al descartar saludo inicial simulado del asistente
+- **date-time**: 2026-10-25 01:50:00
+- **Problema**:
+	- Al enviar "hola" en un chat nuevo, la evaluación de prompt tardaba ~13.8s en lugar de cargar instantáneamente el system prompt ya cacheado (`main_agent`).
+- **Causa**:
+	- El estado inicial de React en `ChatView.jsx` y `handleNewChat` incluye un mensaje de bienvenida de UI (`role: "assistant", content: "Hola, ¿en qué puedo ayudarte hoy?"`).
+	- Al enviar el primer turno, el frontend transmitía ese mensaje del asistente antes del turno del usuario (`raw_messages[0] = assistant`).
+	- Al aplicar el template de Gemma en el proxy, un turno que comienza con asistente genera `<start_of_turn>model\n...` en lugar de `<start_of_turn>user\n...`.
+	- Esto producía una discrepancia en el token 946 (`4368` vs `2364`), haciendo que solo coincidieran 946 de 948 tokens (`946/948`). El motor rechazaba el caché (`Applied cache: False`) y re-evaluaba 996 tokens completos en CPU durante 13.8s.
+- **Solución**:
+	- En `interface/backend/routes/call_ws.py` y `chat.py`, se implementó la omisión de cualquier mensaje del asistente que preceda al primer turno del usuario (`raw_messages = raw_messages[first_user_idx:]`).
+	- En `ChatView.jsx`, se sincronizó el corte de mensajes iniciales del asistente antes de abrir la conexión WebSocket.
+	- Con este cambio, el prefijo enviado al LLM coincide exactamente al 100% (948 de 948 tokens) con el caché binario de `main_agent`, reduciendo la evaluación de prompt a ~0.1s.

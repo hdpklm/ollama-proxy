@@ -953,6 +953,11 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 						continue
 
 					# Normal direct chat flow with Tree Context injected
+					# Strip any leading assistant greeting that precedes the first real user message
+					first_user_idx = next((i for i, m in enumerate(raw_messages) if m.get("role") == "user"), -1)
+					if first_user_idx > 0:
+						raw_messages = raw_messages[first_user_idx:]
+
 					messages = []
 					for m in raw_messages:
 						if m.get("role") == "user":

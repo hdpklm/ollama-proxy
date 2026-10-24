@@ -117,8 +117,13 @@ async def handle_chat(req: ChatRequest):
 		# Dynamic RAG context projection
 		tree_context = await tree_context_manager.project_context(branch_id, clean_user_text)
 
+		raw_req_msgs = req.messages
+		first_user_idx = next((i for i, m in enumerate(raw_req_msgs) if m.get("role") == "user"), -1)
+		if first_user_idx > 0:
+			raw_req_msgs = raw_req_msgs[first_user_idx:]
+
 		messages = []
-		for m in req.messages:
+		for m in raw_req_msgs:
 			if m.get("role") == "user":
 				user_text = m.get("content", "")
 				if not user_text.startswith(("[Fecha y hora", "[Hora local")):

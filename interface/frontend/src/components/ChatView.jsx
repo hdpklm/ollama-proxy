@@ -430,10 +430,12 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 			streamWsRef.current = ws
 
 			ws.onopen = () => {
+				const firstUserIdx = newHistory.findIndex((m) => m.role === "user")
+				const historyToSend = firstUserIdx > 0 ? newHistory.slice(firstUserIdx) : newHistory
 				ws.send(JSON.stringify({
 					turn_id: turnId,
 					session_id: chatSessionId,
-					messages: newHistory,
+					messages: historyToSend,
 					tts_mode: ttsEnabled ? (settings.useBrowserTTS ? "browser" : "rpi5") : "none"
 				}))
 			}
