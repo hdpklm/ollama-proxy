@@ -322,7 +322,8 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 								total_tokens: data.total_tokens,
 								kv_cache_ram_mb: data.kv_cache_ram_mb,
 								priority: data.priority,
-								times_paused: data.times_paused
+								times_paused: data.times_paused,
+								total_turn_seconds: data.total_turn_seconds
 							}
 						}
 
@@ -346,6 +347,21 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 							return prev
 						})
 					} else if (data.type === "metrics_done") {
+						if (data.total_turn_seconds !== undefined) {
+							setMessages((prev) => {
+								const last = prev[prev.length - 1]
+								if (last && last.role === "assistant") {
+									return [
+										...prev.slice(0, -1),
+										{
+											...last,
+											total_turn_seconds: data.total_turn_seconds
+										}
+									]
+								}
+								return prev
+							})
+						}
 						try { metricsWs.close() } catch (e) {}
 						metricsWsRef.current = null
 					}
@@ -421,7 +437,8 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 										usage: data.usage || last.usage,
 										priority: data.priority ?? last.priority,
 										times_paused: data.times_paused ?? last.times_paused,
-										kv_cache_ram_mb: data.kv_cache_ram_mb ?? last.kv_cache_ram_mb
+										kv_cache_ram_mb: data.kv_cache_ram_mb ?? last.kv_cache_ram_mb,
+										total_turn_seconds: data.total_turn_seconds ?? currentGenMetrics?.total_turn_seconds ?? last.total_turn_seconds
 									}
 								]
 							}
@@ -777,6 +794,13 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 											</button>
 										)}
 
+										{(msg.total_turn_seconds || msg.generation_metrics?.total_turn_seconds || msg.generation_metrics?.duration_seconds) && (
+											<span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono text-slate-300 bg-slate-800/90 rounded-lg border border-slate-700/60 shadow-sm" title="Tiempo de respuesta actual de este turno">
+												<Clock className="w-3.5 h-3.5 text-sky-400" />
+												<span>{msg.total_turn_seconds ?? msg.generation_metrics?.total_turn_seconds ?? msg.generation_metrics?.duration_seconds}s</span>
+											</span>
+										)}
+
 										<button
 											onClick={() => toggleMetrics(index)}
 											className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors border ${
@@ -826,7 +850,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 													</div>
 													<div className="text-[11px] text-slate-400 flex items-center gap-1">
 														<Clock className="w-3 h-3 text-slate-500" />
-														<span>Tiempo de carga: <strong className="text-slate-200 font-mono">{msg.model_metrics?.load_time_seconds !== undefined ? `${msg.model_metrics.load_time_seconds}s` : "0.00s (RAM)"}</strong></span>
+														<span>Tiempo de carga en RAM: <strong className="text-slate-200 font-mono">{msg.model_metrics?.in_memory !== false ? "0.00s (RAM)" : `${msg.model_metrics?.load_time_seconds ?? 0}s`}</strong></span>
 													</div>
 												</div>
 											</div>
@@ -880,7 +904,16 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 													<Cpu className="w-3.5 h-3.5 text-sky-400" />
 													<span>Generación de Respuesta</span>
 												</div>
-												<div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+												<div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+													<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex flex-col">
+														<span className="text-[10px] text-slate-400 uppercase tracking-wide">Tiempo Respuesta</span>
+														<span className="text-sm font-semibold text-sky-300 font-mono">
+															{msg.total_turn_seconds !== undefined ? `${msg.total_turn_seconds}s` : (msg.generation_metrics?.total_turn_seconds !== undefined ? `${msg.generation_metrics.total_turn_seconds}s` : (msg.generation_metrics?.duration_seconds ? `${msg.generation_metrics.duration_seconds}s` : "-"))}
+														</span>
+														<span className="text-[10px] text-emerald-400 font-mono mt-0.5">
+															Actual de este turno
+														</span>
+													</div>
 													<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex flex-col">
 														<span className="text-[10px] text-slate-400 uppercase tracking-wide">Tokens Generados</span>
 														<span className="text-sm font-semibold text-slate-100 font-mono">
@@ -901,7 +934,7 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 															Total: {msg.generation_metrics?.total_tokens ?? msg.usage?.total_tokens ?? "-"} tokens
 														</span>
 													</div>
-													<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex flex-col col-span-2 sm:col-span-1">
+													<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex flex-col">
 														<span className="text-[10px] text-slate-400 uppercase tracking-wide">Planificador</span>
 														<span className="text-sm font-semibold text-slate-100">
 															{msg.priority ?? msg.generation_metrics?.priority ? "Alta Prioridad" : "Baja Prioridad"}

@@ -76,7 +76,8 @@ async def list_models(request: Request):
 				"created": int(time.time()),
 				"owned_by": "llama-cpp-python",
 				"in_memory": True if engine is not None else False,
-				"load_time_seconds": load_duration,
+				"load_time_seconds": 0.0 if engine is not None else load_duration,
+				"startup_load_seconds": load_duration,
 			}
 		],
 	}

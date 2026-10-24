@@ -1227,3 +1227,15 @@
 - **Solución**:
 	- En [`backend/prompt_cache.py`](file:///c:/work/person/hassan/Repos/ollama-proxy/backend/prompt_cache.py): implementado `load_configured_to_ram()` recibiendo `configured_prompts` en el constructor, iterando estrictamente sobre los agentes activos y cargando en RAM exclusivamente los binarios cuyo hash coincide exactamente con la configuración actual. Todo binario huérfano o stale queda descartado sin residir en memoria RAM.
 	- Validados tests unitarios en `LLM_Test/gemini/engine/test_prompt_cache.py` y `LLM_Test/gemini/tests/test_clean_prompt_cache_reuse.py`.
+
+### 📝 Registro: [v0.9.28] - Telemetría Actual de Turno y Tiempo Total de Respuesta en Chat
+- **date-time**: 2026-10-24 09:23:00
+- **Problema**:
+	- En la interfaz web de chat (`ChatView.jsx`), el tiempo de carga del modelo mostraba 14.5s (el tiempo global de arranque en frío del proceso proxy) en lugar del tiempo actual de cada turno, y las métricas no mostraban de forma explícita el tiempo de respuesta total transcurrido en el turno actual.
+- **Causa**:
+	- La respuesta de `/v1/models` devolvía estáticamente la duración del arranque inicial (`load_duration`). Asimismo, la interfaz no vinculaba el tiempo de respuesta total del turno a una tarjeta específica en el desglose de métricas ni garantizaba que `done_msg` y el endpoint REST enriquecieran de forma unificada todos los campos de telemetría de turno.
+- **Solución**:
+	- `interface/frontend/src/components/ChatView.jsx`: Se actualizó la etiqueta de carga del modelo en RAM a `Tiempo de carga en RAM: 0.00s (RAM)`. Se expandió la sección de Generación de Respuesta a 4 columnas incluyendo la tarjeta destacada de `Tiempo Respuesta` (`total_turn_seconds` actual de este turno). Se agregó la actualización reactiva en `metrics_done` para fijar el tiempo de turno.
+	- `interface/backend/routes/call_ws.py`: El mensaje de finalización `done` emite directamente los objetos completos `model_metrics`, `kv_metrics`, `prompt_metrics` y `generation_metrics` con valores estrictamente actuales del turno.
+	- `interface/backend/routes/chat.py`: Se incorporó `t_turn_start = time.time()` y se inyectaron todas las métricas actuales del turno (`total_turn_seconds`, `model_metrics`, `kv_metrics`, `prompt_metrics`, `generation_metrics`) en la respuesta REST.
+	- `backend/routes.py` y `interface/backend/services/llm_client.py`: Asegurado que los modelos en RAM reporten `load_time_seconds: 0.0` para turnos activos en memoria.

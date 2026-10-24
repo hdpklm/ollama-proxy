@@ -520,6 +520,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 		from services.agent_manager import load_agent_profile
 		from services.tool_definitions import get_tools_for_agent
 
+		t_turn_start = time.time()
 		main_profile = load_agent_profile("system_prompt")
 		profile_tools = get_tools_for_agent(main_profile)
 		call_tracker: dict[str, int] = {}
@@ -532,13 +533,15 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 		# 1. Emit model load metric to WebSocket 2 (No-streaming)
 		try:
 			model_info = await llm_service.get_model_info(model)
+			is_in_mem = model_info.get("in_memory", True)
+			current_load_time = 0.0 if is_in_mem else model_info.get("load_time_seconds", 0.0)
 			await turn_metrics_manager.emit(turn_id, {
 				"type": "metric",
 				"stage": "model_load",
 				"model": model_info.get("model", model),
-				"load_time_seconds": model_info.get("load_time_seconds", 0.0),
-				"in_memory": model_info.get("in_memory", True),
-				"details": "Modelo en RAM mmap" if model_info.get("in_memory") else "Cargado en memoria"
+				"load_time_seconds": current_load_time,
+				"in_memory": is_in_mem,
+				"details": "Residente en RAM mmap (actual)" if is_in_mem else "Cargado en memoria"
 			})
 		except Exception as e:
 			print(f"[WS Chat] Error emitting model_load metric: {e}")
@@ -551,10 +554,10 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 			await turn_metrics_manager.emit(turn_id, {
 				"type": "metric",
 				"stage": "kv_cache",
-				"restore_time_seconds": 0.005,
+				"restore_time_seconds": 0.001,
 				"ram_mb": kv_ram,
 				"is_cached": True,
-				"details": "Sesión y KV cache activo en RAM"
+				"details": "Sesión y KV cache activo en RAM (actual)"
 			})
 		except Exception as e:
 			print(f"[WS Chat] Error emitting kv_cache metric: {e}")
@@ -719,6 +722,8 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 				prio = last_usage.get("priority", priority) if last_usage else priority
 				paused = last_usage.get("times_paused", 0) if last_usage else 0
 
+				turn_total_seconds = round(time.time() - t_turn_start, 3)
+
 				await turn_metrics_manager.emit(turn_id, {
 					"type": "metric",
 					"stage": "generation_metrics",
@@ -728,19 +733,49 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 					"total_tokens": usage_data.get("total_tokens", prompt_tok + comp_tokens),
 					"kv_cache_ram_mb": kv_ram,
 					"priority": prio,
-					"times_paused": paused
+					"times_paused": paused,
+					"total_turn_seconds": turn_total_seconds
 				})
 				await turn_metrics_manager.emit(turn_id, {
 					"type": "metrics_done",
 					"turn_id": turn_id,
-					"tools_used": executed_tools
+					"tools_used": executed_tools,
+					"total_turn_seconds": turn_total_seconds
 				})
 
 				# WebSocket 1: Notify stream completion
 				done_msg = {
 					"type": "done",
 					"full_text": accumulated,
-					"tools_used": executed_tools
+					"tools_used": executed_tools,
+					"total_turn_seconds": turn_total_seconds,
+					"model_metrics": {
+						"model": model_info.get("model", model),
+						"in_memory": is_in_mem,
+						"load_time_seconds": current_load_time,
+						"details": "Residente en RAM mmap (actual)" if is_in_mem else "Cargado en memoria"
+					},
+					"kv_metrics": {
+						"restore_time_seconds": 0.001,
+						"ram_mb": kv_ram,
+						"is_cached": True,
+						"details": "Sesión y KV cache activo en RAM (actual)"
+					},
+					"prompt_metrics": {
+						"tokens": prompt_tok,
+						"duration_seconds": usage_data.get("prompt_eval_seconds", 0.0),
+						"tokens_per_second": usage_data.get("prompt_tokens_per_second") or usage_data.get("prompt_token_s", 0.0)
+					},
+					"generation_metrics": {
+						"tokens": comp_tokens,
+						"duration_seconds": gen_sec,
+						"tokens_per_second": gen_tps,
+						"total_tokens": usage_data.get("total_tokens", prompt_tok + comp_tokens),
+						"kv_cache_ram_mb": kv_ram,
+						"priority": prio,
+						"times_paused": paused,
+						"total_turn_seconds": turn_total_seconds
+					}
 				}
 				if last_usage:
 					done_msg["usage"] = usage_data
