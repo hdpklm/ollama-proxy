@@ -1309,3 +1309,19 @@
 - **Solución**:
 	- `backend/prompt_cache.py`: Actualizada la condición de `find_best_matching_cache` para aceptar coincidencias donde `prefix_match >= c_len - 4` en cachés de más de 16 tokens (`is_match = (prefix_match == c_len) or (c_len > 16 and prefix_match >= c_len - 4)`).
 	- Verificado: El LLM reutiliza los 946 tokens del KV cache (`[Engine Cache] Request tokens: 987, Applied cache: True, Matched prefix: 948 tokens`), activando el caché tanto en el primer turno como en los turnos sucesivos con herramientas.
+
+### 📝 Registro: [v0.9.35] - Corrección de coincidencia estricta de prefijos y captura de caché temporal post-stream
+- **date-time**: 2026-10-24 13:38:00
+- **Problema**:
+	- Al enviar 4 mensajes en el chat, la carga del caché fallaba o provocaba reevaluaciones completas de ~1000 tokens en CPU tardando ~20s en cada turno.
+- **Causa**:
+	1. `tokenize_system_prompt_prefix` dejaba el token del centinela de usuario en el binario (`960` tokens en vez de `946`), haciendo que el prefijo del system prompt discrepase del mensaje real del usuario.
+	2. `find_best_matching_cache` permitía coincidencias inexactas (`prefix_match >= c_len - 4`). En modelos Gemma con Sliding Window Attention (SWA), `llama_cpp` falla al podar el KV cache (`kv_cache_seq_rm`) y ejecuta `self.reset()`, reevaluando todo desde cero.
+	3. `_wrap_stream_with_cache_update` capturaba el estado temporal en el primer chunk antes de que el asistente generara la respuesta completa, impidiendo que el Turno 2 reutilizara el Turno 1.
+- **Solución**:
+	- En `backend/prompt_cache.py`:
+		- Se extrae con `rfind` el bloque previo a `<start_of_turn>` usando el centinela, garantizando exactamente 946 tokens limpios sin delimitadores sobrantes.
+		- Se exige coincidencia estricta al 100% (`is_match = (prefix_match == c_len)`).
+		- En `load_configured_to_ram`, se invalidan binarios obsoletos con tokens residuales.
+	- En `backend/engine.py`:
+		- Se acumula el texto del asistente a lo largo del stream y se guarda el estado completo con `save_or_replace_temporal_cache` al finalizar el stream (`finally`), permitiendo coincidencia de 100% de tokens en los turnos sucesivos.

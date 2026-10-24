@@ -106,7 +106,7 @@ class LlamaEngine:
 				**extra_params,
 			)
 
-			return self._wrap_stream_with_cache_update(llm, stream, used_cache, request_tokens)
+			return self._wrap_stream_with_cache_update(llm, stream, used_cache, request_tokens, messages=messages, tools=tools)
 
 		prompt = str(job.body.get("prompt", ""))
 		return llm(
@@ -121,19 +121,36 @@ class LlamaEngine:
 		llm: Any,
 		stream: Any,
 		used_cache: Optional[dict],
-		request_tokens: List[int]
+		request_tokens: List[int],
+		messages: Optional[list] = None,
+		tools: Optional[list] = None
 	):
-		first_chunk = True
-		for chunk in stream:
-			if first_chunk:
-				first_chunk = False
+		accumulated_text = ""
+		try:
+			for chunk in stream:
 				try:
-					if hasattr(llm, "save_state") and request_tokens:
-						new_state = llm.save_state()
-						self.prompt_cache.save_or_replace_temporal_cache(used_cache, request_tokens, new_state)
-				except Exception as e:
-					print(f"[Engine] Warning: Could not update temporal cache: {e}", flush=True)
-			yield chunk
+					choice = chunk.get("choices", [{}])[0]
+					delta = choice.get("delta") or {}
+					text = delta.get("content") or ""
+					if text:
+						accumulated_text += text
+				except Exception:
+					pass
+				yield chunk
+		finally:
+			try:
+				if hasattr(llm, "save_state") and request_tokens:
+					final_state = llm.save_state()
+					if messages and accumulated_text:
+						full_msgs = list(messages) + [{"role": "assistant", "content": accumulated_text}]
+						turn_tokens = self.prompt_cache.tokenize_messages(llm, full_msgs, tools=tools)
+					else:
+						turn_tokens = list(request_tokens)
+
+					if turn_tokens:
+						self.prompt_cache.save_or_replace_temporal_cache(used_cache, turn_tokens, final_state)
+			except Exception as e:
+				print(f"[Engine] Warning: Could not update temporal cache at end of stream: {e}", flush=True)
 
 	def extract_chunk(self, job: Job, chunk: dict) -> Tuple[str | dict, str | None]:
 		choice = chunk["choices"][0]

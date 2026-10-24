@@ -274,10 +274,20 @@ class PromptCacheManager:
 					with open(filepath, "rb") as f:
 						data = pickle.load(f)
 					prompt_hash = data.get("hash")
+					tokens = data.get("tokens", [])
+					# If the cached binary has the stale trailing model tokens, remove it so it's regenerated cleanly
+					if len(tokens) >= 3 and tokens[-3:] == [105, 4368, 107]:
+						print(f"[PromptCache] Stale trailing model tokens in '{filepath}'. Removing to regenerate cleanly.")
+						try:
+							os.remove(filepath)
+						except Exception:
+							pass
+						continue
+
 					if prompt_hash == expected_hash and "state" in data:
 						data["is_system"] = True
 						data["last_used"] = time.time()
-						data["token_count"] = len(data.get("tokens", []))
+						data["token_count"] = len(tokens)
 						self.ram_cache[prompt_hash] = data
 						self.agent_hash_map[agent_name] = prompt_hash
 						loaded_count += 1
@@ -351,18 +361,20 @@ class PromptCacheManager:
 					**kwargs
 				)
 				raw = getattr(res, "prompt", str(res))
-				user_delimiters = [
-					"<start_of_turn>user",
-					"<|im_start|>user",
-					"<|start_header_id|>user",
-					"[INST]"
-				]
-				for delim in user_delimiters:
-					if delim in raw:
-						raw = raw.split(delim)[0]
-						break
+				if sentinel in raw:
+					prefix_raw = raw.split(sentinel)[0]
+					for tag in ["<start_of_turn>", "<|im_start|>", "<|start_header_id|>", "[INST]"]:
+						last_idx = prefix_raw.rfind(tag)
+						if last_idx != -1:
+							prefix_raw = prefix_raw[:last_idx]
+							break
+					raw = prefix_raw
 				added_special = getattr(res, "added_special", False)
-				return list(llm.tokenize(raw.encode("utf-8"), add_bos=not added_special, special=True))
+				tokens = list(llm.tokenize(raw.encode("utf-8"), add_bos=not added_special, special=True))
+				# Strip any trailing generation/assistant prompt tokens (e.g. <start_of_turn>model\n)
+				if len(tokens) >= 3 and tokens[-3:] == [105, 4368, 107]:
+					tokens = tokens[:-3]
+				return tokens
 			except Exception as e:
 				print(f"[PromptCache] Notice in tokenize_system_prompt_prefix: {e}")
 
@@ -414,9 +426,12 @@ class PromptCacheManager:
 
 			name = entry.get("agent_name") or entry.get("cache_id")
 			print(f"[Prefix Debug] Candidate '{name}': cached_len={c_len}, req_len={len(request_tokens)}, matched={prefix_match}/{c_len}", flush=True)
+			if prefix_match > 500 and prefix_match < c_len:
+				print(f"[Prefix Debug Mismatch] at {prefix_match}: cached={cached_tokens[prefix_match-2:prefix_match+4]}, req={request_tokens[prefix_match-2:prefix_match+4]}", flush=True)
 
-			# Match if all cached tokens match prefix, or all except up to 4 trailing turn/role delimiter tokens
-			is_match = (prefix_match == c_len) or (c_len > 16 and prefix_match >= c_len - 4)
+			# Match ONLY if all cached tokens match the request prefix exactly (100% prefix match)
+			# Partial KV cache truncation fails in Gemma SWA models and causes llama_cpp to reset and re-eval
+			is_match = (prefix_match == c_len)
 			if is_match and prefix_match > max_matched_len:
 				max_matched_len = prefix_match
 				best_cache = entry
