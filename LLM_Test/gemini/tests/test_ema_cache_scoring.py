@@ -105,8 +105,37 @@ def test_system_prompt_immutability():
 		print(f"System prompt protegido intacto ({original_token_count} tokens). Nuevo temporal creado: {temp_entries[0]['cache_id']}")
 		print(">> Test 3 superado: System prompts completamente inmutables.\n")
 
+def test_tail_divergence_tolerance():
+	print("--- TEST 4: Tolerancia a divergencia en cola (<end_of_turn> 15 tokens) ---")
+	mgr = PromptCacheManager(max_caches=5, ttl_seconds=0, replace_tolerance=15)
+	mgr.temporal_caches.clear()
+
+	# Simulamos el caso real de la Raspberry Pi:
+	# Turno 1 tiene 1041 tokens
+	base_tokens = list(range(1039))
+	tokens_turn1 = base_tokens + [9991, 9992] # 1041 tokens
+	mgr.save_or_replace_temporal_cache(None, tokens_turn1, "state_turn1")
+	assert len(mgr.temporal_caches) == 1
+	cache_id = mgr.temporal_caches[0]["cache_id"]
+
+	# Turno 2: El nuevo mensaje tiene 1089 tokens.
+	# Coincide en los primeros 1039 tokens (difieren los 2 ultimos tokens de delimitador)
+	tokens_turn2 = base_tokens + [8881, 8882] + list(range(10000, 10048)) # 1089 tokens
+
+	# El manager debe detectar que difiere solo en 2 tokens (<= 15) y reemplazar in-place
+	mgr.save_or_replace_temporal_cache(mgr.temporal_caches[0], tokens_turn2, "state_turn2")
+
+	assert len(mgr.temporal_caches) == 1, "Debe mantener un unico cache in-place (no duplicar en RAM)"
+	assert mgr.temporal_caches[0]["cache_id"] == cache_id, "El cache_id debe permanecer"
+	assert mgr.temporal_caches[0]["token_count"] == 1089, "Debe haberse extendido a 1089 tokens"
+	assert mgr.temporal_caches[0]["state"] == "state_turn2", "El estado debe actualizarse"
+	print(f"Cache de 1041 tokens reemplazado in-place con exito a 1089 tokens a pesar de 2 tokens divergentes.")
+	print(">> Test 4 superado: La tolerancia de 15 tokens evita duplicaciones y fugas de memoria.\n")
+
 if __name__ == "__main__":
 	test_ema_scoring_and_eviction()
 	test_inplace_extension()
 	test_system_prompt_immutability()
+	test_tail_divergence_tolerance()
 	print("TODOS LOS TESTS DE EMA Y GESTION DE CACHE SUPERADOS EXITOSAMENTE.")
+

@@ -1379,3 +1379,15 @@
 	- Se garantizó la inmutabilidad absoluta de los system prompts en `self.ram_cache` (actúan como base clonada); los resultados extendidos pasan a `self.temporal_caches` para competir por EMA.
 	- En `save_or_replace_temporal_cache`, si un caché no-system está completamente contenido en el prompt (`request_tokens[:len(cached)] == cached`), se extiende in-place con la nueva longitud y nuevo estado, incrementando su EMA score.
 	- Validados todos los casos mediante `LLM_Test/gemini/tests/test_ema_cache_scoring.py`.
+
+### 📝 Registro: [v0.9.40] - Tolerancia de divergencia en cola (PROMPT_CACHE_TOLERANCE=15) para extension in-place de conversacion
+- **date-time**: 2026-10-25 02:50:00
+- **Problema**:
+	- En la Raspberry Pi 5, al cabo de 4 turnos de conversacion, el contenedor `ollama-proxy` se reiniciaba repentinamente sin traceback en Python debido a un crash por saturacion de memoria RAM (OOM-Killer).
+- **Causa**:
+	- Al finalizar la generacion del turno anterior, el tokenizador/formateador de Gemma añade delimitadores de cierre (`<end_of_turn>\n`), causando que el nuevo prompt coincida en 1039 de 1041 tokens (2 tokens de discrepancia al final del cache previo).
+	- Como se exigia que el 100% estricto de los tokens estuviera contenido sin admitir diferencias de cola, el sistema creaba un nuevo snapshot de ~150 MB en RAM en cada mensaje (`Active temporals: 2, 3, 4, 5...`), acumulando gigabytes de estados duplicados de la misma conversacion hasta agotar la RAM de la RPi5.
+- **Solución**:
+	- Se añadió la variable `PROMPT_CACHE_TOLERANCE=15` en `.env` y `backend/config.py`.
+	- En `backend/prompt_cache.py`, `save_or_replace_temporal_cache` ahora permite que si el prefijo común cubre al menos el 75% del caché y la divergencia final es menor o igual a `replace_tolerance` (15 tokens), se reconozca como la misma conversación y se reemplace **in-place** en ese mismo slot sin crear duplicados.
+	- Validados todos los casos mediante el Test 4 de `LLM_Test/gemini/tests/test_ema_cache_scoring.py` (manteniendo `Active temporals: 1` de forma constante).

@@ -13,6 +13,8 @@ PROMPT_CACHE_DIR = os.getenv("PROMPT_CACHE_DIR", "./cache/prompt_states")
 MAX_PROMPT_CACHES = int(os.getenv("MAX_PROMPT_CACHES", "10"))
 PROMPT_CACHE_TTL = int(os.getenv("PROMPT_CACHE_TTL", "0"))  # 0 = infinite (governed by EMA)
 PROMPT_CACHE_HALF_LIFE = int(os.getenv("PROMPT_CACHE_HALF_LIFE", "1800"))  # 30 min half-life for EMA scoring
+PROMPT_CACHE_TOLERANCE = int(os.getenv("PROMPT_CACHE_TOLERANCE", "15"))  # Max token divergence for in-place replacement
+
 
 
 def resolve_model_path(model_name: str | None = None) -> str:

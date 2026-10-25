@@ -10,12 +10,13 @@ import traceback
 from typing import Dict, Any, Optional, List, Tuple
 
 try:
-	from backend.config import PROMPT_CACHE_DIR, MAX_PROMPT_CACHES, PROMPT_CACHE_TTL, PROMPT_CACHE_HALF_LIFE
+	from backend.config import PROMPT_CACHE_DIR, MAX_PROMPT_CACHES, PROMPT_CACHE_TTL, PROMPT_CACHE_HALF_LIFE, PROMPT_CACHE_TOLERANCE
 except ImportError:
 	PROMPT_CACHE_DIR = os.getenv("PROMPT_CACHE_DIR", "./cache/prompt_states")
 	MAX_PROMPT_CACHES = int(os.getenv("MAX_PROMPT_CACHES", "10"))
 	PROMPT_CACHE_TTL = int(os.getenv("PROMPT_CACHE_TTL", "0"))
 	PROMPT_CACHE_HALF_LIFE = int(os.getenv("PROMPT_CACHE_HALF_LIFE", "1800"))
+	PROMPT_CACHE_TOLERANCE = int(os.getenv("PROMPT_CACHE_TOLERANCE", "15"))
 
 try:
 	import llama_cpp
@@ -252,7 +253,8 @@ class PromptCacheManager:
 		configured_prompts: Dict[str, str] | None = None,
 		max_caches: int | None = None,
 		ttl_seconds: int | None = None,
-		half_life_seconds: int | None = None
+		half_life_seconds: int | None = None,
+		replace_tolerance: int | None = None
 	):
 		self.cache_dir = cache_dir or PROMPT_CACHE_DIR
 		os.makedirs(self.cache_dir, exist_ok=True)
@@ -261,6 +263,7 @@ class PromptCacheManager:
 		self.max_caches: int = max_caches or MAX_PROMPT_CACHES
 		self.ttl_seconds: int = ttl_seconds if ttl_seconds is not None else PROMPT_CACHE_TTL
 		self.half_life_seconds: float = float(half_life_seconds or PROMPT_CACHE_HALF_LIFE)
+		self.replace_tolerance: int = int(replace_tolerance if replace_tolerance is not None else PROMPT_CACHE_TOLERANCE)
 
 		# System prompts RAM cache: hash -> cache payload dict
 		self.ram_cache: Dict[str, Dict[str, Any]] = {}
@@ -533,23 +536,55 @@ class PromptCacheManager:
 		new_state: Any
 	):
 		now = time.time()
-		# Si se utilizo un cache temporal (no-system) y todos sus tokens estan contenidos en el prompt:
+		req_len = len(request_tokens)
+
+		# 1. Determinar el cache objetivo para reemplazo in-place:
+		# Primero revisamos si el used_cache califica dentro de la tolerancia de tokens
+		target_cache: Optional[Dict[str, Any]] = None
 		if used_cache and not used_cache.get("is_system", False):
 			cached_tokens = used_cache.get("tokens", [])
-			if cached_tokens and request_tokens[:len(cached_tokens)] == cached_tokens:
-				used_cache["tokens"] = list(request_tokens)
-				used_cache["token_count"] = len(request_tokens)
-				used_cache["state"] = new_state
-				self.record_cache_hit(used_cache, now)
-				print(f"[PromptCache] Extended temporal cache '{used_cache.get('cache_id')}' in-place to {len(request_tokens)} tokens (EMA: {used_cache.get('ema_score', 0):.2f}).")
-				return
+			c_len = len(cached_tokens)
+			common = 0
+			while common < min(c_len, req_len) and cached_tokens[common] == request_tokens[common]:
+				common += 1
+			# Si coincide al menos el 75% y difiere a lo sumo en 'replace_tolerance' tokens al final
+			if c_len > 0 and (c_len - common) <= self.replace_tolerance and common >= int(c_len * 0.75) and req_len >= common:
+				target_cache = used_cache
 
-		# Si vino de un system prompt o un nuevo flujo, compite en la lista de temporales
-		cache_id = f"temporal_{int(now * 1000)}_{len(request_tokens)}"
+		# 2. Si used_cache no califico (ej: empezo en system prompt),
+		# buscamos si en la lista de temporales hay algun cache previo de la misma conversacion dentro de la tolerancia
+		if not target_cache:
+			for entry in self.temporal_caches:
+				c_tokens = entry.get("tokens", [])
+				c_len = len(c_tokens)
+				if c_len == 0:
+					continue
+				common = 0
+				while common < min(c_len, req_len) and c_tokens[common] == request_tokens[common]:
+					common += 1
+				if (c_len - common) <= self.replace_tolerance and common >= int(c_len * 0.75) and req_len >= common:
+					target_cache = entry
+					break
+
+		# 3. Reemplazo in-place si se encontro un candidato dentro del margen de tolerancia
+		if target_cache:
+			prev_len = len(target_cache.get("tokens", []))
+			target_cache["tokens"] = list(request_tokens)
+			target_cache["token_count"] = req_len
+			target_cache["state"] = new_state
+			self.record_cache_hit(target_cache, now)
+			print(
+				f"[PromptCache] Extended temporal cache '{target_cache.get('cache_id')}' in-place "
+				f"from {prev_len} to {req_len} tokens (tolerance {self.replace_tolerance}, EMA: {target_cache.get('ema_score', 0):.2f})."
+			)
+			return
+
+		# 4. Si es una conversacion totalmente nueva, se registra y compite por EMA
+		cache_id = f"temporal_{int(now * 1000)}_{req_len}"
 		entry = {
 			"cache_id": cache_id,
 			"tokens": list(request_tokens),
-			"token_count": len(request_tokens),
+			"token_count": req_len,
 			"state": new_state,
 			"last_used": now,
 			"ema_score": 1.0,
@@ -558,7 +593,7 @@ class PromptCacheManager:
 		}
 		self.temporal_caches.append(entry)
 		self.enforce_max_caches()
-		print(f"[PromptCache] Saved new temporal cache '{cache_id}' ({len(request_tokens)} tokens, EMA=1.0). Active temporals: {len(self.temporal_caches)}.")
+		print(f"[PromptCache] Saved new temporal cache '{cache_id}' ({req_len} tokens, EMA=1.0). Active temporals: {len(self.temporal_caches)}.")
 
 	def save_cache(self, agent_name: str, prompt_text: str, state: Any, tokens: list, tools: list | None = None) -> str:
 		prompt_hash = self.compute_hash(prompt_text, tools=tools)
