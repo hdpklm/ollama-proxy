@@ -3,17 +3,55 @@ import os
 import glob
 import time
 import json
+import math
 import hashlib
 import pickle
 import traceback
 from typing import Dict, Any, Optional, List, Tuple
 
 try:
-	from backend.config import PROMPT_CACHE_DIR, MAX_PROMPT_CACHES, PROMPT_CACHE_TTL
+	from backend.config import PROMPT_CACHE_DIR, MAX_PROMPT_CACHES, PROMPT_CACHE_TTL, PROMPT_CACHE_HALF_LIFE
 except ImportError:
 	PROMPT_CACHE_DIR = os.getenv("PROMPT_CACHE_DIR", "./cache/prompt_states")
 	MAX_PROMPT_CACHES = int(os.getenv("MAX_PROMPT_CACHES", "10"))
-	PROMPT_CACHE_TTL = int(os.getenv("PROMPT_CACHE_TTL", "3600"))
+	PROMPT_CACHE_TTL = int(os.getenv("PROMPT_CACHE_TTL", "0"))
+	PROMPT_CACHE_HALF_LIFE = int(os.getenv("PROMPT_CACHE_HALF_LIFE", "1800"))
+
+try:
+	import llama_cpp
+except ImportError:
+	llama_cpp = None
+
+
+def truncate_llm_state(llm: Any, target_tokens: int) -> bool:
+	"""
+	Desplaza el cursor del KV cache hacia atras hasta `target_tokens`.
+	Elimina todas las posiciones >= target_tokens en la memoria C++ del modelo
+	y ajusta el estado interno de Llama para continuar evaluando desde alli.
+	"""
+	if not llm or not hasattr(llm, "n_tokens"):
+		return False
+	current_tokens = llm.n_tokens
+	if target_tokens >= current_tokens:
+		return True
+	if target_tokens < 0:
+		return False
+
+	try:
+		if hasattr(llm, "_ctx") and hasattr(llm._ctx, "kv_cache_seq_rm"):
+			llm._ctx.kv_cache_seq_rm(-1, target_tokens, -1)
+		elif llama_cpp and hasattr(llama_cpp, "llama_memory_seq_rm") and hasattr(llm, "_ctx"):
+			llama_cpp.llama_memory_seq_rm(llm._ctx.ctx, -1, target_tokens, -1)
+	except Exception as e:
+		print(f"[PromptCache] Error in truncate_llm_state: {e}")
+		return False
+
+	llm.n_tokens = target_tokens
+	if hasattr(llm, "input_ids"):
+		llm.input_ids[target_tokens:] = 0
+	llm._requires_eval = True
+	return True
+
 
 def _parse_yaml_fallback(yaml_text: str) -> dict:
 	metadata: Dict[str, Any] = {}
@@ -213,25 +251,43 @@ class PromptCacheManager:
 		cache_dir: str | None = None,
 		configured_prompts: Dict[str, str] | None = None,
 		max_caches: int | None = None,
-		ttl_seconds: int | None = None
+		ttl_seconds: int | None = None,
+		half_life_seconds: int | None = None
 	):
 		self.cache_dir = cache_dir or PROMPT_CACHE_DIR
 		os.makedirs(self.cache_dir, exist_ok=True)
 		self.configured_prompts: Dict[str, str] = configured_prompts if configured_prompts is not None else DEFAULT_AGENT_PROMPTS
 		self.agent_metadata: Dict[str, dict] = DEFAULT_AGENT_METADATA
 		self.max_caches: int = max_caches or MAX_PROMPT_CACHES
-		self.ttl_seconds: int = ttl_seconds or PROMPT_CACHE_TTL
+		self.ttl_seconds: int = ttl_seconds if ttl_seconds is not None else PROMPT_CACHE_TTL
+		self.half_life_seconds: float = float(half_life_seconds or PROMPT_CACHE_HALF_LIFE)
 
 		# System prompts RAM cache: hash -> cache payload dict
 		self.ram_cache: Dict[str, Dict[str, Any]] = {}
 		self.agent_hash_map: Dict[str, str] = {}
 
-		# Dynamic temporal caches: list of {cache_id, tokens, token_count, state, last_used, is_system}
+		# Dynamic temporal caches: list of {cache_id, tokens, token_count, state, last_used, ema_score, hit_count, is_system}
 		self.temporal_caches: List[Dict[str, Any]] = []
 
 		# In-memory caller context snapshots for delegation
 		self.ram_snapshots: Dict[str, Any] = {}
 		self.load_configured_to_ram()
+
+	def calculate_current_ema(self, entry: Dict[str, Any], now: float) -> float:
+		"""Calcula el score EMA actual aplicando decaimiento exponencial continuo."""
+		last_used = entry.get("last_used", now)
+		base_score = entry.get("ema_score", 1.0)
+		dt = max(0.0, now - last_used)
+		# Constante de desintegracion (lambda) derivada del periodo de vida media
+		decay = math.exp(- (0.69314718056 / max(1.0, self.half_life_seconds)) * dt)
+		return base_score * decay
+
+	def record_cache_hit(self, entry: Dict[str, Any], now: float):
+		"""Incrementa el valor EMA del cache al ser reutilizado activamente."""
+		current_score = self.calculate_current_ema(entry, now)
+		entry["ema_score"] = current_score + 1.0
+		entry["last_used"] = now
+		entry["hit_count"] = entry.get("hit_count", 0) + 1
 
 	def save_snapshot(self, snapshot_id: str, state: Any):
 		self.ram_snapshots[snapshot_id] = state
@@ -383,6 +439,10 @@ class PromptCacheManager:
 		return list(llm.tokenize(prompt_text.encode("utf-8")))
 
 	def clean_expired_temporals(self):
+		if self.ttl_seconds <= 0:
+			# TTL <= 0 significa tiempo infinito, la sustitucion se gestiona puramente por scoring EMA
+			return
+
 		now = time.time()
 		valid_temporals = []
 		for entry in self.temporal_caches:
@@ -394,26 +454,28 @@ class PromptCacheManager:
 
 	def enforce_max_caches(self):
 		if len(self.temporal_caches) > self.max_caches:
-			# Sort by last_used ascending (least recently used first)
-			self.temporal_caches.sort(key=lambda c: c.get("last_used", 0.0))
+			now = time.time()
+			# Ordenar por EMA score ascendente: el cache con menor valor ponderado se desaloja primero
+			self.temporal_caches.sort(key=lambda c: self.calculate_current_ema(c, now))
 			excess = len(self.temporal_caches) - self.max_caches
 			removed = self.temporal_caches[:excess]
 			self.temporal_caches = self.temporal_caches[excess:]
 			for r in removed:
-				print(f"[PromptCache] Evicted LRU temporal cache '{r.get('cache_id')}' (limit {self.max_caches}).")
+				score = self.calculate_current_ema(r, now)
+				print(f"[PromptCache] Evicted low-EMA temporal cache '{r.get('cache_id')}' (score={score:.4f}, hits={r.get('hit_count', 1)}, limit {self.max_caches}).")
 
-	def find_best_matching_cache(self, request_tokens: List[int]) -> Optional[Dict[str, Any]]:
+	def find_best_matching_cache(self, request_tokens: List[int]) -> Tuple[Optional[Dict[str, Any]], int]:
 		if not request_tokens:
-			return None
+			return None, 0
 
 		self.clean_expired_temporals()
 
 		best_cache: Optional[Dict[str, Any]] = None
 		max_matched_len = 0
 
-		# 1. System prompt caches (permanent)
+		# 1. System prompt caches (permanentes, intocables)
 		system_entries = list(self.ram_cache.values())
-		# 2. Dynamic temporal caches
+		# 2. Dynamic temporal caches (compiten por EMA score)
 		candidates = system_entries + self.temporal_caches
 
 		for entry in candidates:
@@ -428,25 +490,37 @@ class PromptCacheManager:
 
 			name = entry.get("agent_name") or entry.get("cache_id")
 			print(f"[Prefix Debug] Candidate '{name}': cached_len={c_len}, req_len={len(request_tokens)}, matched={prefix_match}/{c_len}", flush=True)
-			if prefix_match > 500 and prefix_match < c_len:
-				print(f"[Prefix Debug Mismatch] at {prefix_match}: cached={cached_tokens[prefix_match-2:prefix_match+4]}, req={request_tokens[prefix_match-2:prefix_match+4]}", flush=True)
 
-			# Match ONLY if all cached tokens match the request prefix exactly (100% prefix match)
-			# Partial KV cache truncation fails in Gemma SWA models and causes llama_cpp to reset and re-eval
-			is_match = (prefix_match == c_len)
-			if is_match and prefix_match > max_matched_len:
+			# Selecciona el candidato con el prefijo comun mas largo
+			if prefix_match > max_matched_len:
 				max_matched_len = prefix_match
 				best_cache = entry
 
-		return best_cache
+		return best_cache, max_matched_len
 
-	def apply_best_cache(self, llm: Any, request_tokens: List[int]) -> Tuple[bool, Optional[Dict[str, Any]], int]:
-		best_cache = self.find_best_matching_cache(request_tokens)
-		if best_cache and hasattr(llm, "load_state"):
+	def apply_best_cache(self, llm: Any, request_tokens: List[int], min_match: int = 16) -> Tuple[bool, Optional[Dict[str, Any]], int]:
+		best_cache, matched_count = self.find_best_matching_cache(request_tokens)
+		if best_cache and matched_count >= min_match and hasattr(llm, "load_state"):
 			try:
+				now = time.time()
 				llm.load_state(best_cache["state"])
-				best_cache["last_used"] = time.time()
-				matched_count = len(best_cache.get("tokens", []))
+				cached_len = len(best_cache.get("tokens", []))
+				name = best_cache.get("agent_name") or best_cache.get("cache_id")
+
+				# Actualizar score EMA solo si es un cache temporal de dialogo
+				if not best_cache.get("is_system", False):
+					self.record_cache_hit(best_cache, now)
+					print(f"[PromptCache] Temporal cache '{name}' hit recorded (new EMA score: {best_cache.get('ema_score', 0):.2f}).", flush=True)
+				else:
+					best_cache["last_used"] = now
+
+				# Si el prefijo comun es menor que la longitud del cache, desplazamos el cursor y podar KV cache
+				if matched_count < cached_len:
+					truncate_llm_state(llm, matched_count)
+					print(f"[PromptCache] Loaded cache '{name}' and trimmed cursor from {cached_len} to {matched_count} tokens.", flush=True)
+				else:
+					print(f"[PromptCache] Loaded exact 100% cache '{name}' ({matched_count} tokens).", flush=True)
+
 				return True, best_cache, matched_count
 			except Exception as e:
 				print(f"[PromptCache] Error loading state from best cache: {e}")
@@ -459,18 +533,18 @@ class PromptCacheManager:
 		new_state: Any
 	):
 		now = time.time()
-		# If a non-system cache was used and its tokens completely matched the prefix:
+		# Si se utilizo un cache temporal (no-system) y todos sus tokens estan contenidos en el prompt:
 		if used_cache and not used_cache.get("is_system", False):
 			cached_tokens = used_cache.get("tokens", [])
 			if cached_tokens and request_tokens[:len(cached_tokens)] == cached_tokens:
 				used_cache["tokens"] = list(request_tokens)
 				used_cache["token_count"] = len(request_tokens)
 				used_cache["state"] = new_state
-				used_cache["last_used"] = now
-				print(f"[PromptCache] Replaced temporal cache '{used_cache.get('cache_id')}' with {len(request_tokens)} tokens.")
+				self.record_cache_hit(used_cache, now)
+				print(f"[PromptCache] Extended temporal cache '{used_cache.get('cache_id')}' in-place to {len(request_tokens)} tokens (EMA: {used_cache.get('ema_score', 0):.2f}).")
 				return
 
-		# Otherwise create a new temporal cache
+		# Si vino de un system prompt o un nuevo flujo, compite en la lista de temporales
 		cache_id = f"temporal_{int(now * 1000)}_{len(request_tokens)}"
 		entry = {
 			"cache_id": cache_id,
@@ -478,11 +552,13 @@ class PromptCacheManager:
 			"token_count": len(request_tokens),
 			"state": new_state,
 			"last_used": now,
+			"ema_score": 1.0,
+			"hit_count": 1,
 			"is_system": False
 		}
 		self.temporal_caches.append(entry)
 		self.enforce_max_caches()
-		print(f"[PromptCache] Saved new temporal cache '{cache_id}' ({len(request_tokens)} tokens). Active temporals: {len(self.temporal_caches)}.")
+		print(f"[PromptCache] Saved new temporal cache '{cache_id}' ({len(request_tokens)} tokens, EMA=1.0). Active temporals: {len(self.temporal_caches)}.")
 
 	def save_cache(self, agent_name: str, prompt_text: str, state: Any, tokens: list, tools: list | None = None) -> str:
 		prompt_hash = self.compute_hash(prompt_text, tools=tools)

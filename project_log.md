@@ -1351,3 +1351,31 @@
 	- En `interface/backend/routes/call_ws.py` y `chat.py`, se implementó la omisión de cualquier mensaje del asistente que preceda al primer turno del usuario (`raw_messages = raw_messages[first_user_idx:]`).
 	- En `ChatView.jsx`, se sincronizó el corte de mensajes iniciales del asistente antes de abrir la conexión WebSocket.
 	- Con este cambio, el prefijo enviado al LLM coincide exactamente al 100% (948 de 948 tokens) con el caché binario de `main_agent`, reduciendo la evaluación de prompt a ~0.1s.
+
+### 📝 Registro: [v0.9.38] - Poda de KV Cache y desplazamiento de cursor por prefijo común más largo (LCP)
+- **date-time**: 2026-10-25 02:53:00
+- **Problema**:
+	- Cuando un prompt no coincidía al 100% con un caché existente (por ejemplo, si difería en los últimos tokens del system prompt o tras editar un mensaje previo en el historial), el motor descartaba el caché completo y re-evaluaba todos los tokens desde cero en CPU.
+- **Causa**:
+	- `find_best_matching_cache` exigía una coincidencia estricta del 100% (`prefix_match == c_len`).
+	- No existía en el motor una rutina para desplazar el cursor del KV cache hacia atrás y podar las celdas de memoria sobrantes en la capa C++ de `llama.cpp`.
+- **Solución**:
+	- Se implementó `truncate_llm_state(llm, target_tokens)` en `backend/prompt_cache.py`, que poda quirúrgicamente el KV cache en C++ mediante `llama_memory_seq_rm` / `_ctx.kv_cache_seq_rm` y actualiza el contador `n_tokens` e `input_ids`.
+	- Se actualizó `find_best_matching_cache` para seleccionar el candidato de la lista con el prefijo común idéntico más largo (LCP).
+	- Se actualizó `apply_best_cache` para podar el estado cargado al tamaño de coincidencia (`matched_count`), permitiendo reutilizar inmediatamente el prefijo común sin recalcularlo.
+	- Validado con pruebas de logits idénticos (0.000000e+00 de diferencia) y probado en vivo en el contenedor `ollama-proxy` (ejemplo: reutilización de 429 de 457 tokens con recorte exitoso).
+
+### 📝 Registro: [v0.9.39] - Algoritmo de desalojo por EMA, tiempo infinito y extensión in-place cuando el prefijo está contenido
+- **date-time**: 2026-10-25 02:26:00
+- **Problema**:
+	- Caches temporales con alta frecuencia antigua permanecían en RAM frente a conversaciones activas recientes si se usaba conteo simple.
+	- El límite TTL fijo podía borrar diálogos en pausas naturales.
+	- Al continuar una conversación (donde todos los tokens del caché previo están contenidos en el nuevo prompt), se requería asegurar la extensión in-place sin duplicar entradas ni alterar los system prompts fijos.
+- **Causa**:
+	- El algoritmo de desalojo anterior ordenaba únicamente por `last_used` plano o dependía de expiración fija `PROMPT_CACHE_TTL`.
+- **Solución**:
+	- Se implementó en `backend/prompt_cache.py` el cálculo continuo de **EMA (Exponential Moving Average)** con vida media (`PROMPT_CACHE_HALF_LIFE = 1800s`), donde cada uso suma +1.0 y decae exponencialmente según el tiempo transcurrido ($\Delta t$).
+	- Se configuró `PROMPT_CACHE_TTL = 0` (tiempo infinito) en `backend/config.py`, delegando la selección de reemplazo 100% al score EMA.
+	- Se garantizó la inmutabilidad absoluta de los system prompts en `self.ram_cache` (actúan como base clonada); los resultados extendidos pasan a `self.temporal_caches` para competir por EMA.
+	- En `save_or_replace_temporal_cache`, si un caché no-system está completamente contenido en el prompt (`request_tokens[:len(cached)] == cached`), se extiende in-place con la nueva longitud y nuevo estado, incrementando su EMA score.
+	- Validados todos los casos mediante `LLM_Test/gemini/tests/test_ema_cache_scoring.py`.
