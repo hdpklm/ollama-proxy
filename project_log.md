@@ -1391,3 +1391,16 @@
 	- Se añadió la variable `PROMPT_CACHE_TOLERANCE=15` en `.env` y `backend/config.py`.
 	- En `backend/prompt_cache.py`, `save_or_replace_temporal_cache` ahora permite que si el prefijo común cubre al menos el 75% del caché y la divergencia final es menor o igual a `replace_tolerance` (15 tokens), se reconozca como la misma conversación y se reemplace **in-place** en ese mismo slot sin crear duplicados.
 	- Validados todos los casos mediante el Test 4 de `LLM_Test/gemini/tests/test_ema_cache_scoring.py` (manteniendo `Active temporals: 1` de forma constante).
+
+### 📝 Registro: [v0.9.41] - Rediseño compacto HUD para métricas de chat
+- **date-time**: 2026-10-25 03:04:15
+- **Problema**:
+	- El acordeón de métricas ("Métricas") ocupaba demasiado espacio vertical en pantalla (~350px), dispersaba información redundante en 4 tarjetas grandes apiladas, mostraba un hash sha256 de 64 caracteres en dos líneas, y dejaba una caja gris vacía y voluminosa cuando no se utilizaban herramientas externas.
+- **Causa**:
+	- Diseño original basado en múltiples tarjetas independientes con padding excesivo y textos de estado repetitivos sin formateador de nombres de modelo.
+- **Solución**:
+	- En `interface/frontend/src/components/ChatView.jsx`:
+		1. Incorporada la función auxiliar `formatModelName(name)` para compactar hashes largos de modelo (ej. `gemma4 (6dd7ac...5937d)`).
+		2. Reemplazado el encabezado por una barra compacta HUD superior que resume en una línea: Modelo, estado RAM (mmap), nivel de prioridad del planificador, pausas detectadas y duración total del turno.
+		3. Creada una rejilla compacta de 3 columnas (Prompt/Input, Generación/Output, KV Cache & RAM) mostrando tokens, velocidades (t/s) y duraciones de forma alineada y legible.
+		4. Si no se usan herramientas externas, se sustituye la caja gris vacía por una línea discreta y minimalista ("Inferencia pura / sin herramientas").

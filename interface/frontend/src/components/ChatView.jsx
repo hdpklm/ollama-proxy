@@ -1,5 +1,13 @@
 import React, { useState, useRef, useEffect } from "react"
 import { Send, Mic, Square, Play, Pause, Loader2, Bot, User, Volume2, VolumeX, Activity, Wrench, ChevronDown, ChevronUp, Cpu, Terminal, Clock, Database, Zap, Layers, CheckCircle2, PlusCircle } from "lucide-react"
+const formatModelName = (name) => {
+	if (!name) return "gemma4:e2b"
+	if (name.startsWith("sha256-") || name.startsWith("sha256:")) {
+		const clean = name.replace(/^sha256[:-]/, "")
+		return `gemma4 (${clean.slice(0, 6)}...${clean.slice(-4)})`
+	}
+	return name
+}
 
 export default function ChatView({ settings = { useBrowserTTS: false, useBrowserSTT: false } }) {
 	const [chatSessionId, setChatSessionId] = useState(() => {
@@ -929,164 +937,144 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 									</div>
 
 									{openMetricsIndices[index] && (
-										<div className="w-full bg-slate-950/80 border border-slate-800/90 rounded-xl p-3 text-xs text-slate-300 space-y-3 shadow-inner">
-											{/* 1. Carga del Modelo */}
-											<div>
-												<div className="flex items-center gap-1.5 font-semibold text-slate-200 mb-1.5">
-													<Database className="w-3.5 h-3.5 text-sky-400" />
-													<span>Modelo y Estado en Memoria</span>
+										<div className="w-full bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-300 space-y-2.5 shadow-xl">
+											{/* Top HUD Bar: Modelo, Estado de Memoria y Planificador */}
+											<div className="bg-slate-900/80 border border-slate-800/80 rounded-lg px-2.5 py-1.5 flex items-center justify-between flex-wrap gap-2 text-[11px]">
+												<div className="flex items-center gap-2">
+													<Database className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
+													<span className="font-mono text-sky-300 font-semibold truncate max-w-[240px] sm:max-w-none" title={msg.model_metrics?.model || "gemma4:e2b"}>
+														{formatModelName(msg.model_metrics?.model || "gemma4:e2b")}
+													</span>
+													<span className={`inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium border ${
+														msg.model_metrics?.in_memory !== false
+															? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+															: "bg-amber-500/15 text-amber-300 border-amber-500/30"
+													}`}>
+														<CheckCircle2 className="w-2.5 h-2.5 mr-1" />
+														{msg.model_metrics?.in_memory !== false ? "RAM (mmap)" : "Cargando"}
+													</span>
 												</div>
-												<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2.5 flex items-center justify-between flex-wrap gap-2">
-													<div className="flex items-center gap-2">
-														<span className="font-mono text-sky-300 font-semibold text-xs">
-															{msg.model_metrics?.model || "gemma4:e2b"}
-														</span>
-														<span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${
-															msg.model_metrics?.in_memory !== false
-																? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-																: "bg-amber-500/20 text-amber-300 border-amber-500/40"
-														}`}>
-															<CheckCircle2 className="w-2.5 h-2.5 mr-1" />
-															{msg.model_metrics?.in_memory !== false ? "En RAM (mmap)" : "Cargando"}
-														</span>
-													</div>
-													<div className="text-[11px] text-slate-400 flex items-center gap-1">
-														<Clock className="w-3 h-3 text-slate-500" />
-														<span>Tiempo de carga en RAM: <strong className="text-slate-200 font-mono">{msg.model_metrics?.in_memory !== false ? "0.00s (RAM)" : `${msg.model_metrics?.load_time_seconds ?? 0}s`}</strong></span>
-													</div>
+												<div className="flex items-center gap-2.5 text-[10px] text-slate-400 font-mono">
+													<span className="inline-flex items-center gap-1">
+														<span className={`w-1.5 h-1.5 rounded-full ${msg.priority ?? msg.generation_metrics?.priority ? "bg-amber-400" : "bg-sky-400"}`} />
+														{msg.priority ?? msg.generation_metrics?.priority ? "Prioridad Alta" : "Prioridad Normal"}
+													</span>
+													{(msg.times_paused ?? msg.generation_metrics?.times_paused) > 0 && (
+														<span className="text-amber-400">({msg.times_paused ?? msg.generation_metrics?.times_paused} pausas)</span>
+													)}
+													<span className="text-slate-500">|</span>
+													<span className="text-slate-300 flex items-center gap-1">
+														<Clock className="w-3 h-3 text-slate-400" />
+														Turno: <strong className="text-sky-300">{msg.total_turn_seconds !== undefined ? `${msg.total_turn_seconds}s` : (msg.generation_metrics?.total_turn_seconds !== undefined ? `${msg.generation_metrics.total_turn_seconds}s` : (msg.generation_metrics?.duration_seconds ? `${msg.generation_metrics.duration_seconds}s` : "-"))}</strong>
+													</span>
 												</div>
 											</div>
 
-											{/* 2. Evaluación de Prompt & KV Cache */}
-											<div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-												{/* Prompt Exec */}
-												<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2.5 flex flex-col justify-between">
-													<div className="flex items-center gap-1.5 text-slate-300 font-semibold mb-1">
-														<Zap className="w-3.5 h-3.5 text-amber-400" />
-														<span>Evaluación de Prompt</span>
-													</div>
-													<div className="flex items-baseline justify-between mt-1">
-														<span className="text-sm font-semibold text-slate-100 font-mono">
-															{msg.prompt_metrics?.tokens ?? msg.usage?.prompt_tokens ?? "-"} <span className="text-[10px] font-normal text-slate-400">tokens</span>
+											{/* Compact 3-Column Metrics HUD Grid */}
+											<div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+												{/* Col 1: Evaluación de Prompt (Input) */}
+												<div className="bg-slate-900/60 border border-slate-800/80 rounded-lg p-2 flex flex-col justify-between">
+													<div className="flex items-center justify-between text-slate-300 mb-1">
+														<span className="flex items-center gap-1 font-semibold text-[11px]">
+															<Zap className="w-3 h-3 text-amber-400" />
+															Prompt (Input)
 														</span>
-														<span className="text-xs text-amber-400 font-mono">
+														<span className="text-amber-400 font-mono text-[11px] font-semibold">
 															{(msg.prompt_metrics?.tokens_per_second || msg.usage?.prompt_tokens_per_second || msg.usage?.prompt_token_s)
 																? `${msg.prompt_metrics?.tokens_per_second || msg.usage?.prompt_tokens_per_second || msg.usage?.prompt_token_s} t/s`
 																: "-"}
 														</span>
 													</div>
-													<span className="text-[10px] text-slate-500 mt-1">
-														Duración prompt: <strong className="text-slate-400">{msg.prompt_metrics?.duration_seconds ?? msg.usage?.prompt_eval_seconds ?? "-"}s</strong>
-													</span>
+													<div className="flex items-baseline justify-between mt-0.5">
+														<span className="text-xs font-mono font-bold text-slate-100">
+															{msg.prompt_metrics?.tokens ?? msg.usage?.prompt_tokens ?? "-"} <span className="text-[10px] font-normal text-slate-400">tokens</span>
+														</span>
+														<span className="text-[10px] font-mono text-slate-400">
+															{msg.prompt_metrics?.duration_seconds ?? msg.usage?.prompt_eval_seconds ?? "-"}s
+														</span>
+													</div>
 												</div>
 
-												{/* KV Cache / Session Recovery */}
-												<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2.5 flex flex-col justify-between">
-													<div className="flex items-center gap-1.5 text-slate-300 font-semibold mb-1">
-														<Clock className="w-3.5 h-3.5 text-emerald-400" />
-														<span>Recuperación de Sesión (KV Cache)</span>
-													</div>
-													<div className="flex items-baseline justify-between mt-1">
-														<span className="text-sm font-semibold text-emerald-300 font-mono">
-															{msg.kv_metrics?.restore_time_seconds !== undefined ? `${msg.kv_metrics.restore_time_seconds}s` : "0.005s"}
+												{/* Col 2: Generación de Respuesta (Output) */}
+												<div className="bg-slate-900/60 border border-slate-800/80 rounded-lg p-2 flex flex-col justify-between">
+													<div className="flex items-center justify-between text-slate-300 mb-1">
+														<span className="flex items-center gap-1 font-semibold text-[11px]">
+															<Cpu className="w-3 h-3 text-sky-400" />
+															Generación (Output)
 														</span>
-														<span className="text-xs text-sky-400 font-mono">
-															{msg.kv_metrics?.ram_mb ?? msg.generation_metrics?.kv_cache_ram_mb ?? msg.kv_cache_ram_mb ?? "-"} MB RAM
-														</span>
-													</div>
-													<span className="text-[10px] text-slate-500 mt-1">
-														Estado: <strong className="text-slate-400">{msg.kv_metrics?.details || "Cache residente en memoria RAM"}</strong>
-													</span>
-												</div>
-											</div>
-
-											{/* 3. Generación del Asistente */}
-											<div>
-												<div className="flex items-center gap-1.5 font-semibold text-slate-200 mb-1.5">
-													<Cpu className="w-3.5 h-3.5 text-sky-400" />
-													<span>Generación de Respuesta</span>
-												</div>
-												<div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-													<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex flex-col">
-														<span className="text-[10px] text-slate-400 uppercase tracking-wide">Tiempo Respuesta</span>
-														<span className="text-sm font-semibold text-sky-300 font-mono">
-															{msg.total_turn_seconds !== undefined ? `${msg.total_turn_seconds}s` : (msg.generation_metrics?.total_turn_seconds !== undefined ? `${msg.generation_metrics.total_turn_seconds}s` : (msg.generation_metrics?.duration_seconds ? `${msg.generation_metrics.duration_seconds}s` : "-"))}
-														</span>
-														<span className="text-[10px] text-emerald-400 font-mono mt-0.5">
-															Actual de este turno
-														</span>
-													</div>
-													<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex flex-col">
-														<span className="text-[10px] text-slate-400 uppercase tracking-wide">Tokens Generados</span>
-														<span className="text-sm font-semibold text-slate-100 font-mono">
-															{msg.generation_metrics?.tokens ?? msg.usage?.completion_tokens ?? "-"}
-														</span>
-														<span className="text-[11px] text-emerald-400 font-mono mt-0.5">
+														<span className="text-emerald-400 font-mono text-[11px] font-semibold">
 															{(msg.generation_metrics?.tokens_per_second || msg.usage?.tokens_per_second || msg.usage?.generate_token_s)
 																? `${msg.generation_metrics?.tokens_per_second || msg.usage?.tokens_per_second || msg.usage?.generate_token_s} t/s`
 																: "-"}
 														</span>
 													</div>
-													<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex flex-col">
-														<span className="text-[10px] text-slate-400 uppercase tracking-wide">Tiempo Generación</span>
-														<span className="text-sm font-semibold text-slate-100 font-mono">
-															{msg.generation_metrics?.duration_seconds ?? msg.usage?.generation_seconds ?? "-"} s
+													<div className="flex items-baseline justify-between mt-0.5">
+														<span className="text-xs font-mono font-bold text-slate-100">
+															{msg.generation_metrics?.tokens ?? msg.usage?.completion_tokens ?? "-"} <span className="text-[10px] font-normal text-slate-400">tokens</span>
 														</span>
-														<span className="text-[10px] text-slate-400 mt-0.5">
-															Total: {msg.generation_metrics?.total_tokens ?? msg.usage?.total_tokens ?? "-"} tokens
+														<span className="text-[10px] font-mono text-slate-400">
+															{msg.generation_metrics?.duration_seconds ?? msg.usage?.generation_seconds ?? "-"}s
 														</span>
 													</div>
-													<div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2 flex flex-col">
-														<span className="text-[10px] text-slate-400 uppercase tracking-wide">Planificador</span>
-														<span className="text-sm font-semibold text-slate-100">
-															{msg.priority ?? msg.generation_metrics?.priority ? "Alta Prioridad" : "Baja Prioridad"}
+												</div>
+
+												{/* Col 3: Sesión & KV Cache (RAM) */}
+												<div className="bg-slate-900/60 border border-slate-800/80 rounded-lg p-2 flex flex-col justify-between">
+													<div className="flex items-center justify-between text-slate-300 mb-1">
+														<span className="flex items-center gap-1 font-semibold text-[11px]">
+															<Layers className="w-3 h-3 text-emerald-400" />
+															KV Cache & RAM
 														</span>
-														<span className="text-[10px] text-amber-400 mt-0.5">
-															{(msg.times_paused ?? msg.generation_metrics?.times_paused) > 0
-																? `${msg.times_paused ?? msg.generation_metrics?.times_paused} pausas`
-																: "Sin interrupciones"}
+														<span className="text-sky-300 font-mono text-[11px] font-semibold">
+															{msg.kv_metrics?.ram_mb ?? msg.generation_metrics?.kv_cache_ram_mb ?? msg.kv_cache_ram_mb ?? "-"} MB
+														</span>
+													</div>
+													<div className="flex items-baseline justify-between mt-0.5">
+														<span className="text-[10px] text-emerald-300 font-mono">
+															Restauración: <strong>{msg.kv_metrics?.restore_time_seconds !== undefined ? `${msg.kv_metrics.restore_time_seconds}s` : "0.001s"}</strong>
+														</span>
+														<span className="text-[10px] font-mono text-slate-400">
+															Total: {msg.generation_metrics?.total_tokens ?? msg.usage?.total_tokens ?? "-"} tok
 														</span>
 													</div>
 												</div>
 											</div>
 
-											{/* 4. Sub-Agentes (si se ejecutaron) */}
+											{/* Sub-Agentes (si existieron) */}
 											{msg.subagents_metrics && msg.subagents_metrics.length > 0 && (
-												<div className="pt-2 border-t border-slate-800/60">
-													<div className="flex items-center gap-1.5 font-semibold text-slate-200 mb-1.5">
-														<Bot className="w-3.5 h-3.5 text-purple-400" />
+												<div className="pt-1.5 border-t border-slate-800/60">
+													<div className="flex items-center gap-1.5 font-semibold text-slate-200 mb-1 text-[11px]">
+														<Bot className="w-3 h-3 text-purple-400" />
 														<span>Sub-Agentes Ejecutados ({msg.subagents_metrics.length})</span>
 													</div>
-													<div className="space-y-2 mt-1">
+													<div className="space-y-1.5 mt-1">
 														{msg.subagents_metrics.map((sub, sIdx) => (
-															<div key={sIdx} className="bg-purple-950/20 border border-purple-900/40 rounded-lg p-2.5 text-[11px] space-y-1.5">
+															<div key={sIdx} className="bg-purple-950/20 border border-purple-900/40 rounded-lg p-2 text-[10px] space-y-1">
 																<div className="flex items-center justify-between flex-wrap gap-1 font-semibold text-purple-300">
 																	<span className="flex items-center gap-1">
-																		<Bot className="w-3 h-3 text-purple-400" />
-																		<span>Sub-Agente: {sub.name ? sub.name.toUpperCase() : "AGENTE"}</span>
+																		<Bot className="w-2.5 h-2.5 text-purple-400" />
+																		<span>{sub.name ? sub.name.toUpperCase() : "AGENTE"}</span>
 																	</span>
-																	<span className="font-mono text-[10px] text-slate-400">
-																		Modelo: {sub.model} ({sub.duration_seconds}s total)
+																	<span className="font-mono text-[9px] text-slate-400">
+																		{formatModelName(sub.model)} ({sub.duration_seconds}s)
 																	</span>
 																</div>
-																<div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10px] font-mono">
-																	<div className="bg-slate-900/90 rounded p-1 border border-slate-800/60">
-																		<span className="text-slate-400 block text-[9px]">Prompt</span>
-																		<span className="text-slate-200">{sub.prompt_tokens} tok</span>
-																		<span className="text-amber-400 block text-[9px]">{sub.prompt_tps} t/s</span>
+																<div className="grid grid-cols-4 gap-1 font-mono text-[9px]">
+																	<div className="bg-slate-900/90 rounded px-1.5 py-0.5 border border-slate-800/60">
+																		<span className="text-slate-400">Prompt: </span>
+																		<span className="text-slate-200">{sub.prompt_tokens}t ({sub.prompt_tps} t/s)</span>
 																	</div>
-																	<div className="bg-slate-900/90 rounded p-1 border border-slate-800/60">
-																		<span className="text-slate-400 block text-[9px]">Generación</span>
-																		<span className="text-slate-200">{sub.completion_tokens} tok</span>
-																		<span className="text-emerald-400 block text-[9px]">{sub.generation_tps} t/s</span>
+																	<div className="bg-slate-900/90 rounded px-1.5 py-0.5 border border-slate-800/60">
+																		<span className="text-slate-400">Gen: </span>
+																		<span className="text-slate-200">{sub.completion_tokens}t ({sub.generation_tps} t/s)</span>
 																	</div>
-																	<div className="bg-slate-900/90 rounded p-1 border border-slate-800/60">
-																		<span className="text-slate-400 block text-[9px]">Restore KV</span>
+																	<div className="bg-slate-900/90 rounded px-1.5 py-0.5 border border-slate-800/60">
+																		<span className="text-slate-400">KV: </span>
 																		<span className="text-emerald-300">{sub.kv_restore_time_seconds}s</span>
 																	</div>
-																	<div className="bg-slate-900/90 rounded p-1 border border-slate-800/60">
-																		<span className="text-slate-400 block text-[9px]">KV RAM</span>
-																		<span className="text-sky-300">{sub.kv_cache_ram_mb} MB</span>
+																	<div className="bg-slate-900/90 rounded px-1.5 py-0.5 border border-slate-800/60">
+																		<span className="text-slate-400">RAM: </span>
+																		<span className="text-sky-300">{sub.kv_cache_ram_mb}MB</span>
 																	</div>
 																</div>
 															</div>
@@ -1095,25 +1083,25 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 												</div>
 											)}
 
-											{/* 5. Tool-Calling & Desglose de Tokens */}
-											<div className="pt-2 border-t border-slate-800/60">
-												<div className="flex items-center gap-1.5 font-semibold text-slate-200 mb-1.5">
-													<Wrench className="w-3.5 h-3.5 text-amber-400" />
-													<span>Herramientas y Desglose de Tokens (Tool-Calling)</span>
-												</div>
-												{((msg.tools_metrics && msg.tools_metrics.length > 0) || (msg.tools_used && msg.tools_used.length > 0)) ? (
-													<div className="space-y-2 mt-1">
+											{/* Herramientas (Tool-Calling) */}
+											{((msg.tools_metrics && msg.tools_metrics.length > 0) || (msg.tools_used && msg.tools_used.length > 0)) ? (
+												<div className="pt-1.5 border-t border-slate-800/60">
+													<div className="flex items-center gap-1.5 font-semibold text-slate-200 mb-1 text-[11px]">
+														<Wrench className="w-3 h-3 text-amber-400" />
+														<span>Herramientas Ejecutadas ({((msg.tools_metrics || msg.tools_used).length)})</span>
+													</div>
+													<div className="space-y-1.5 mt-1">
 														{(msg.tools_metrics || msg.tools_used).map((t, tIdx) => (
 															<div
 																key={tIdx}
-																className="bg-slate-900/90 border border-slate-800 rounded-lg p-2.5 text-[11px] font-mono text-slate-300"
+																className="bg-slate-900/90 border border-slate-800 rounded-lg p-2 text-[10px] font-mono text-slate-300"
 															>
-																<div className="flex items-center justify-between font-semibold mb-1.5 flex-wrap gap-1">
+																<div className="flex items-center justify-between font-semibold mb-1 flex-wrap gap-1">
 																	<span className="flex items-center gap-1">
 																		{t.tool && t.tool.startsWith("delegate_to_") ? (
-																			<Bot className="w-3 h-3 text-purple-400" />
+																			<Bot className="w-2.5 h-2.5 text-purple-400" />
 																		) : (
-																			<Terminal className="w-3 h-3 text-amber-400" />
+																			<Terminal className="w-2.5 h-2.5 text-amber-400" />
 																		)}
 																		<span className={t.tool && t.tool.startsWith("delegate_to_") ? "text-purple-300 font-medium" : "text-sky-400"}>
 																			{t.tool && t.tool.startsWith("delegate_to_")
@@ -1121,15 +1109,15 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 																				: (t.tool || "herramienta")}
 																		</span>
 																	</span>
-																	<div className="flex items-center gap-2">
+																	<div className="flex items-center gap-1.5">
 																		{t.duration_seconds !== undefined && (
-																			<span className="inline-flex items-center text-[10px] text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700/60">
-																				<Clock className="w-2.5 h-2.5 mr-1 text-slate-400" />
+																			<span className="inline-flex items-center text-[9px] text-slate-300 bg-slate-800 px-1 py-0.2 rounded border border-slate-700/60">
+																				<Clock className="w-2 h-2 mr-0.5 text-slate-400" />
 																				{t.duration_seconds}s
 																			</span>
 																		)}
 																		{t.step !== undefined && (
-																			<span className="text-[10px] text-slate-500 font-normal">
+																			<span className="text-[9px] text-slate-500 font-normal">
 																				Paso {t.step + 1}
 																			</span>
 																		)}
@@ -1138,40 +1126,46 @@ export default function ChatView({ settings = { useBrowserTTS: false, useBrowser
 
 																{/* Tokens Breakdown */}
 																{(t.call_tokens !== undefined || t.total_tokens !== undefined) && (
-																	<div className="grid grid-cols-3 gap-1.5 mb-2 bg-slate-950/70 p-1.5 rounded border border-slate-800/60 text-[10px]">
+																	<div className="grid grid-cols-3 gap-1 mb-1.5 bg-slate-950/70 px-2 py-1 rounded border border-slate-800/60 text-[9px]">
 																		<div>
-																			<span className="text-slate-500 block text-[9px]">Petición Agente</span>
+																			<span className="text-slate-500 block text-[8px]">Prompt</span>
 																			<span className="text-amber-300 font-semibold">{t.call_tokens ?? "-"} tok</span>
 																		</div>
 																		<div>
-																			<span className="text-slate-500 block text-[9px]">Respuesta Función</span>
+																			<span className="text-slate-500 block text-[8px]">Salida</span>
 																			<span className="text-sky-300 font-semibold">{t.result_tokens ?? "-"} tok</span>
 																		</div>
 																		<div>
-																			<span className="text-slate-500 block text-[9px]">Total Tool</span>
+																			<span className="text-slate-500 block text-[8px]">Total</span>
 																			<span className="text-emerald-300 font-semibold">{t.total_tokens ?? "-"} tok</span>
 																		</div>
 																	</div>
 																)}
 
 																{t.args && Object.keys(t.args).length > 0 ? (
-																	<div className="bg-slate-950/80 rounded p-1.5 overflow-x-auto text-slate-400 text-[10px] border border-slate-800/50">
+																	<div className="bg-slate-950/80 rounded p-1 overflow-x-auto text-slate-400 text-[9px] border border-slate-800/50">
 																		{typeof t.args === "string"
 																			? t.args
 																			: JSON.stringify(t.args, null, 2)}
 																	</div>
 																) : (
-																	<span className="text-slate-500 text-[10px]">Sin argumentos</span>
+																	<span className="text-slate-500 text-[9px]">Sin argumentos</span>
 																)}
 															</div>
 														))}
 													</div>
-												) : (
-													<div className="text-[11px] text-slate-400 italic bg-slate-900/40 border border-slate-800/40 rounded-lg p-2">
-														No se utilizaron herramientas externas en este turno.
-													</div>
-												)}
-											</div>
+												</div>
+											) : (
+												<div className="text-[10px] text-slate-500 flex items-center justify-between pt-1 border-t border-slate-800/40">
+													<span className="flex items-center gap-1">
+														<Zap className="w-2.5 h-2.5 text-amber-500/70" />
+														Inferencia pura (sin llamadas a herramientas)
+													</span>
+													<span className="font-mono text-[9px] text-slate-500">
+														KV Cache activo
+													</span>
+												</div>
+											)}
 										</div>
 									)}
 								</div>
