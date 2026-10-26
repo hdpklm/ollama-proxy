@@ -1486,3 +1486,17 @@
 		2. En la pestaña "Árbol TreeNode", se incorporó un selector de origen para conmutar al instante entre `"Global (En Vivo)"` y `"Sesión Seleccionada"`.
 		3. Se protegió el estado vacío para que, si una sesión histórica carece de árbol guardado, ofrezca un botón directo para saltar a la memoria global actual.
 	- Validada la serialización con una nueva prueba unitaria `test_tree_structure_serialization` en `LLM_Test/gemini/cache/test_radix_tree_cache.py` (8/8 tests OK en 0.031s) y compilación exitosa del frontend (`pnpm build` en 5.03s).
+
+### 📝 Registro: [v0.9.48] - Habilitación de Scroll Horizontal con Rueda de Ratón y Scrollbar Visible en TreeNode
+- **date-time**: 2026-10-26 14:07:00
+- **Problema**:
+	- Al visualizar el árbol TreeNode, los parámetros y textos ultra largos no respondían al desplazamiento horizontal con la rueda del ratón (problema clásico de `overflow-x: auto` en navegadores de escritorio en Windows) y la barra de desplazamiento resultaba invisible o colapsada. Además, al interactuar con el texto o hacer clic para arrastrar, se disparaba involuntariamente el colapso del nodo.
+- **Causa**:
+	- Los eventos `onWheel` verticales (`deltaY`) no son convertidos nativamente a `scrollLeft` por los navegadores en elementos `overflow-x` sin tecla Shift pulsada, y el evento `onClick` estaba asignado al contenedor global de toda la fila.
+- **Solución**:
+	- En `interface/frontend/src/index.css`: se añadió la clase utilitaria `.horizontal-scroll-container` con scrollbar de 8px de alto de contraste nítido (`#0284c7` / `#38bdf8`) para motores Webkit y Firefox.
+	- En `interface/frontend/src/components/HistoryModal.jsx`:
+		1. En `TreeNodeItem`, se desacopló el clic de colapsar/expandir dejándolo exclusivamente en el bloque de cabecera/chevron, protegiendo el área de parámetros contra cierres accidentales.
+		2. Se implementó el manejador `handleWheel` en el contenedor de parámetros que traduce el movimiento de la rueda del ratón (`deltaY`) directamente a `scrollLeft`, permitiendo scroll horizontal suave e instantáneo simplemente rodando el ratón sobre la fila.
+		3. Se aplicó `.horizontal-scroll-container` tanto a cada fila de parámetros como al contenedor general de la tarjeta del árbol (`overflow-x-auto p-3.5`).
+	- Verificada la compilación exitosa del frontend (`pnpm build` en 3.30s).

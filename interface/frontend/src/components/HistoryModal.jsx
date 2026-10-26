@@ -23,13 +23,16 @@ function TreeNodeItem({ node, path = "root", level = 0, expandedNodes, onToggle 
 	const hasChildren = childrenKeys.length > 0
 	const isExpanded = !!expandedNodes[path]
 
+	const handleWheel = (e) => {
+		if (e.deltaY !== 0) {
+			e.currentTarget.scrollLeft += e.deltaY
+		}
+	}
+
 	return (
 		<div className="w-full min-w-0 max-w-full my-1">
 			<div
-				onClick={() => hasChildren && onToggle(path)}
-				className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all text-xs select-none max-w-full min-w-0 ${
-					hasChildren ? "cursor-pointer hover:bg-slate-800/60" : "cursor-default"
-				} ${
+				className={`flex items-center gap-2 p-2 rounded-xl border transition-all text-xs max-w-full min-w-0 ${
 					level === 0
 						? "bg-sky-950/40 border-sky-800/50 text-sky-200"
 						: level === 1
@@ -38,25 +41,31 @@ function TreeNodeItem({ node, path = "root", level = 0, expandedNodes, onToggle 
 				}`}
 				style={{ marginLeft: `${Math.min(level * 16, 64)}px` }}
 			>
-				{hasChildren ? (
-					<button
-						type="button"
-						className="p-1 rounded-md bg-slate-800/80 text-sky-400 hover:bg-slate-700/80 flex-shrink-0"
-						title={isExpanded ? "Colapsar nodo" : "Expandir nodo"}
-					>
-						{isExpanded ? (
-							<ChevronDown className="w-3.5 h-3.5" />
-						) : (
-							<ChevronRight className="w-3.5 h-3.5" />
-						)}
-					</button>
-				) : (
-					<div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
-						<span className="w-1.5 h-1.5 rounded-full bg-slate-600" />
-					</div>
-				)}
+				{/* Toggle Trigger */}
+				<div
+					onClick={() => hasChildren && onToggle(path)}
+					className={`flex items-center gap-2 flex-shrink-0 select-none ${
+						hasChildren ? "cursor-pointer hover:opacity-80" : "cursor-default"
+					}`}
+				>
+					{hasChildren ? (
+						<button
+							type="button"
+							className="p-1 rounded-md bg-slate-800/80 text-sky-400 hover:bg-slate-700/80 flex-shrink-0"
+							title={isExpanded ? "Colapsar nodo" : "Expandir nodo"}
+						>
+							{isExpanded ? (
+								<ChevronDown className="w-3.5 h-3.5" />
+							) : (
+								<ChevronRight className="w-3.5 h-3.5" />
+							)}
+						</button>
+					) : (
+						<div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
+							<span className="w-1.5 h-1.5 rounded-full bg-slate-600" />
+						</div>
+					)}
 
-				<div className="flex items-center gap-2 flex-shrink-0">
 					<span className="font-semibold text-white tracking-wide">{node.name || "node"}</span>
 					<span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700/60">
 						Nivel {level}
@@ -68,11 +77,15 @@ function TreeNodeItem({ node, path = "root", level = 0, expandedNodes, onToggle 
 					)}
 				</div>
 
-				{/* Parameters with Horizontal Scroll to prevent screen enlargement */}
-				<div className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden whitespace-nowrap scrollbar-thin scrollbar-thumb-slate-700 py-0.5">
+				{/* Parameters with Active Horizontal Scroll & Mouse Wheel */}
+				<div
+					onClick={(e) => e.stopPropagation()}
+					onWheel={handleWheel}
+					className="flex-1 min-w-0 horizontal-scroll-container overflow-x-auto whitespace-nowrap py-1 px-2 bg-slate-950/70 rounded-lg border border-slate-800/80 select-text cursor-default"
+				>
 					<div className="inline-flex items-center gap-2 text-[11px] text-slate-400 font-mono">
 						{node.updated_at && (
-							<span className="inline-flex items-center gap-1 bg-slate-950/70 px-2 py-0.5 rounded border border-slate-800/80">
+							<span className="inline-flex items-center gap-1 bg-slate-900/90 text-slate-300 px-2 py-0.5 rounded border border-slate-800 flex-shrink-0">
 								<Clock className="w-3 h-3 text-slate-500" />
 								{new Date(node.updated_at * 1000).toLocaleString("es-ES", {
 									hour: "2-digit",
@@ -85,7 +98,7 @@ function TreeNodeItem({ node, path = "root", level = 0, expandedNodes, onToggle 
 						)}
 
 						{node.data && (
-							<span className="inline-flex items-center gap-1 bg-slate-950/90 text-emerald-300 px-2 py-0.5 rounded border border-emerald-900/50">
+							<span className="inline-flex items-center gap-1 bg-slate-900/90 text-emerald-300 px-2 py-0.5 rounded border border-emerald-900/50 flex-shrink-0">
 								<span className="text-emerald-500 font-bold">data:</span>
 								<span>{node.data}</span>
 							</span>
@@ -94,7 +107,7 @@ function TreeNodeItem({ node, path = "root", level = 0, expandedNodes, onToggle 
 						{Object.entries(node)
 							.filter(([k]) => !["name", "children", "updated_at", "data"].includes(k))
 							.map(([k, v]) => (
-								<span key={k} className="inline-flex items-center gap-1 bg-slate-950/70 px-2 py-0.5 rounded border border-slate-800">
+								<span key={k} className="inline-flex items-center gap-1 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800 text-slate-300 flex-shrink-0">
 									<span className="text-slate-500 font-semibold">{k}:</span>
 									<span>{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
 								</span>
@@ -544,14 +557,16 @@ export default function HistoryModal({ isOpen, onClose }) {
 												</button>
 											</div>
 										) : (
-											<div className="w-full min-w-0 max-w-full overflow-hidden p-3 rounded-2xl bg-slate-950/40 border border-slate-800/80">
-												<TreeNodeItem
-													node={treeData}
-													path="root"
-													level={0}
-													expandedNodes={expandedNodes}
-													onToggle={toggleNode}
-												/>
+											<div className="w-full min-w-0 max-w-full overflow-x-auto p-3.5 rounded-2xl bg-slate-950/40 border border-slate-800/80 horizontal-scroll-container">
+												<div className="w-full min-w-0">
+													<TreeNodeItem
+														node={treeData}
+														path="root"
+														level={0}
+														expandedNodes={expandedNodes}
+														onToggle={toggleNode}
+													/>
+												</div>
 											</div>
 										)}
 									</div>

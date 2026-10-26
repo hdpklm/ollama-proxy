@@ -38,3 +38,30 @@ body,
 ::-webkit-scrollbar-thumb:hover {
 	background: #475569;
 }
+
+/* Specific visible horizontal scrollbar */
+.horizontal-scroll-container {
+	overflow-x: auto !important;
+	scrollbar-width: thin !important;
+	scrollbar-color: #0284c7 #0f172a !important;
+}
+
+.horizontal-scroll-container::-webkit-scrollbar {
+	height: 8px !important;
+}
+
+.horizontal-scroll-container::-webkit-scrollbar-track {
+	background: #090d16 !important;
+	border-radius: 4px !important;
+}
+
+.horizontal-scroll-container::-webkit-scrollbar-thumb {
+	background: #0284c7 !important;
+	border-radius: 4px !important;
+	border: 1px solid #0f172a !important;
+}
+
+.horizontal-scroll-container::-webkit-scrollbar-thumb:hover {
+	background: #38bdf8 !important;
+}
+
