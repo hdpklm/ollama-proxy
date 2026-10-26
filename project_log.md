@@ -1404,3 +1404,42 @@
 		2. Reemplazado el encabezado por una barra compacta HUD superior que resume en una línea: Modelo, estado RAM (mmap), nivel de prioridad del planificador, pausas detectadas y duración total del turno.
 		3. Creada una rejilla compacta de 3 columnas (Prompt/Input, Generación/Output, KV Cache & RAM) mostrando tokens, velocidades (t/s) y duraciones de forma alineada y legible.
 		4. Si no se usan herramientas externas, se sustituye la caja gris vacía por una línea discreta y minimalista ("Inferencia pura / sin herramientas").
+
+### 📝 Registro: [v0.9.42] - Motor de Cache Radix Tree Jerárquico por Capas con Node Splitting y Poda Post-Orden
+- **date-time**: 2026-10-26 13:01:00
+- **Problema**:
+	- El caché anterior utilizaba un mapeo plano en memoria donde cada entrada guardaba tokens completos y estados completos, provocando duplicación redundante en RAM cuando múltiples peticiones compartían el mismo system prompt o prefijos idénticos de tokens.
+	- Se requería una estructura jerárquica en capas (`TreeNode`) que almacene deltas de tokens y cachés fragmentados, con división dinámica de nodos (*node splitting*) ante coincidencias parciales, protección permanente e incondicional de los System Prompts (`is_system=True`), y poda estricta en post-orden exclusiva de hojas (*leaf-first*) para no eliminar nunca una rama con hijos activos.
+- **Causa**:
+	- La ausencia de una jerarquía de árbol impedía compartir sub-ramas de tokens entre diálogos divergentes y forzaba el desalojo tosco o la sobreescritura de cachés que aún compartían raíces válidas.
+- **Solución**:
+	- Se implementó la clase `CacheTreeNode` en `backend/prompt_cache.py` con interfaz compatible con diccionarios (`get`, `__getitem__`, `__setitem__`), punteros a padre/hijos (`parent`, `children`), flag de permanencia `is_system`, métricas EMA y acceso a tokens de ruta completa (`get_path_tokens()`).
+	- Se reestructuró `PromptCacheManager` en un árbol Radix con nodo raíz virtual `self.root`. La Capa 1 aloja exclusivamente los System Prompts como nodos permanentes inmunes a cualquier desalojo.
+	- Se diseñó el algoritmo de búsqueda de prefijos con partición de nodos (*node splitting*): ante coincidencia parcial de $M < N$ tokens, el nodo se divide en un prefijo intermedio recortado y una rama hija 1 con el resto del contenido existente. Al terminar la inferencia, la nueva generación se cuelga como rama hija 2 hermana de la anterior.
+	- Se implementó el sistema de poda por TTL en post-orden (`prune_expired_nodes`), garantizando que primero se eliminan las hojas expiradas y que ninguna rama con hijos activos sea podada jamás, podando a los padres solo cuando queden sin hijos y su propio TTL haya vencido.
+	- Se actualizó `enforce_max_caches` para desalojar exclusivamente nodos hoja no-sistema basándose en score ponderado EMA.
+	- Se crearon pruebas unitarias exhaustivas en `LLM_Test/gemini/cache/test_radix_tree_cache.py` validando la jerarquía, división de ramas, persistencia de system prompts y poda estricta ascendente.
+
+### 📝 Registro: [v0.9.43] - Truncado y Filtrado Estricto de Tokens EOS y Secuencias Posteriores en el Cache
+- **date-time**: 2026-10-26 13:09:30
+- **Problema**:
+	- Al finalizar una generación, el token de fin de secuencia (EOS / `<end_of_turn>` / `</s>` / `<|im_end|>`) y eventuales tokens espurios generados después del EOS quedaban incluidos en la secuencia de tokens y en el estado KV persistido en el caché del árbol Radix.
+- **Causa**:
+	- El formateador y la concatenación de turnos acumulaban el texto completo del turno del asistente sin recortar el delimitador de parada ni retroceder el cursor del KV cache en el motor C++ de Llama.
+- **Solución**:
+	- En `backend/prompt_cache.py`: implementados los métodos `get_eos_token_ids(llm)` y `strip_eos_tokens(llm, tokens)` para detectar dinámicamente los IDs de EOS según el modelo activo y recortar cualquier token a partir del primer EOS detectado.
+	- En `backend/engine.py`: en `_wrap_stream_with_cache_update`, antes de invocar `llm.save_state()`, se filtran los tokens con `strip_eos_tokens`. Si se detecta un EOS, se invoca `truncate_llm_state(llm, len(clean_turn_tokens))` para sincronizar el estado interno del modelo C++ antes de capturar el snapshot, garantizando que ni el EOS ni tokens posteriores contaminen el árbol o la RAM.
+	- Añadida prueba unitaria `test_strip_eos_and_subsequent_tokens` en `LLM_Test/gemini/cache/test_radix_tree_cache.py` validando el descarte del EOS y de cualquier token posterior (6/6 tests superados).
+
+### 📝 Registro: [v0.9.44] - Arquitectura de Adaptadores de Modelo para backend/ y Aislamiento de Tokens EOS por Dialecto
+- **date-time**: 2026-10-26 13:26:00
+- **Problema**:
+	- El motor de inferencia y caché de `backend/` no disponía de los adaptadores de modelo dentro de su propio namespace de contenedor (estaban restringidos a `interface/`), y la detección de EOS corría riesgo de generar falsos positivos si se usaban conjuntos genéricos de IDs entre familias de modelos distintas (ej: Gemma vs Qwen vs LLaMA).
+- **Causa**:
+	- El contenedor `ollama-proxy` monta y empaqueta exclusivamente `backend/` y `main.py`, sin acceso a `interface/backend/services/adapters`.
+- **Solución**:
+	- Se creó el módulo de adaptadores en `backend/adapters/` (`base.py`, `gemma4.py`, `qwen.py`, `openai.py`, `registry.py`, `__init__.py`) disponible directamente en el contenedor del proxy.
+	- Cada adaptador define sus delimitadores exactos (`eos_tokens`), como `<end_of_turn>` en Gemma y `<|im_end|>` en Qwen, y provee el método `get_eos_token_ids(llm)` para extraer única y exclusivamente los token IDs del modelo en ejecución.
+	- En `backend/engine.py`: `LlamaEngine` resuelve el adaptador activo con `get_adapter(self.model_path)` e inicializa los tokens EOS en `PromptCacheManager`.
+	- En `backend/prompt_cache.py`: `PromptCacheManager` utiliza `self.adapter` para recortar tokens EOS evitando falsos positivos inter-modelo.
+	- Añadida prueba `test_adapter_eos_isolation_prevents_false_positives` en `LLM_Test/gemini/cache/test_radix_tree_cache.py` comprobando que Gemma no se confunde con tokens de Qwen y viceversa (7/7 tests superados).

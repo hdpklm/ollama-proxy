@@ -38,8 +38,11 @@ class LlamaEngine:
 		)
 		self.load_duration = round(time.time() - t_load_start, 3)
 		self.last_restore_duration = 0.0
-		# Initialize binary prompt cache and pre-warm known agents into RAM
-		self.prompt_cache = PromptCacheManager()
+		# Resolve model adapter and initialize binary prompt cache
+		from backend.adapters import get_adapter
+		self.adapter = get_adapter(self.model_path)
+		self.prompt_cache = PromptCacheManager(adapter=self.adapter)
+		self.prompt_cache.init_adapter_eos(self.llm_low)
 		self.prompt_cache.warmup_defaults(self.llm_low)
 
 	def count_prompt_tokens(self, job: Job) -> int:
@@ -142,15 +145,23 @@ class LlamaEngine:
 		finally:
 			try:
 				if hasattr(llm, "save_state") and request_tokens:
-					final_state = llm.save_state()
 					if messages and accumulated_text:
 						full_msgs = list(messages) + [{"role": "assistant", "content": accumulated_text}]
 						turn_tokens = self.prompt_cache.tokenize_messages(llm, full_msgs, tools=tools)
 					else:
 						turn_tokens = list(request_tokens)
 
-					if turn_tokens:
-						self.prompt_cache.save_or_replace_temporal_cache(used_cache, turn_tokens, final_state)
+					# Strip EOS and any tokens beyond EOS before caching
+					clean_turn_tokens = self.prompt_cache.strip_eos_tokens(llm, turn_tokens)
+
+					# If tokens were stripped at the end, truncate LLM cursor to match before saving KV state
+					if len(clean_turn_tokens) < len(turn_tokens):
+						from backend.prompt_cache import truncate_llm_state
+						truncate_llm_state(llm, len(clean_turn_tokens))
+
+					final_state = llm.save_state()
+					if clean_turn_tokens:
+						self.prompt_cache.save_or_replace_temporal_cache(used_cache, clean_turn_tokens, final_state)
 			except Exception as e:
 				print(f"[Engine] Warning: Could not update temporal cache at end of stream: {e}", flush=True)
 

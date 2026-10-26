@@ -23,6 +23,8 @@ try:
 except ImportError:
 	llama_cpp = None
 
+from backend.adapters import get_adapter, BaseModelAdapter
+
 
 def truncate_llm_state(llm: Any, target_tokens: int) -> bool:
 	"""
@@ -246,6 +248,95 @@ def build_tools_for_agent_metadata(metadata: dict) -> List[dict]:
 
 CACHE_FORMAT_VERSION = 3
 
+class CacheTreeNode:
+	def __init__(
+		self,
+		tokens: List[int],
+		state: Any = None,
+		is_system: bool = False,
+		parent: Optional[CacheTreeNode] = None,
+		cache_id: Optional[str] = None,
+		agent_name: Optional[str] = None,
+		prompt_hash: Optional[str] = None
+	):
+		self.tokens: List[int] = list(tokens)
+		self.state: Any = state
+		self.is_system: bool = is_system
+		self.parent: Optional[CacheTreeNode] = parent
+		self.children: List[CacheTreeNode] = []
+		self.cache_id: str = cache_id or f"node_{int(time.time() * 1000)}_{len(tokens)}"
+		self.agent_name: Optional[str] = agent_name
+		self.prompt_hash: Optional[str] = prompt_hash
+		self.last_used: float = time.time()
+		self.hit_count: int = 1
+		self.ema_score: float = 1.0
+
+	def get_path_tokens(self) -> List[int]:
+		"""Returns all tokens accumulated from root down to this node."""
+		path = []
+		curr: Optional[CacheTreeNode] = self
+		while curr is not None and curr.tokens:
+			path.append(curr.tokens)
+			curr = curr.parent
+		res = []
+		for seg in reversed(path):
+			res.extend(seg)
+		return res
+
+	# Dict-like compatibility interface
+	def get(self, key: str, default: Any = None) -> Any:
+		if key == "cache_id":
+			return self.cache_id
+		if key == "tokens":
+			return self.tokens
+		if key == "state":
+			return self.state
+		if key == "is_system":
+			return self.is_system
+		if key == "last_used":
+			return self.last_used
+		if key == "ema_score":
+			return self.ema_score
+		if key == "hit_count":
+			return self.hit_count
+		if key == "agent_name":
+			return self.agent_name
+		if key == "token_count":
+			return len(self.tokens)
+		if key in ("prompt_hash", "hash"):
+			return self.prompt_hash
+		return default
+
+	def __getitem__(self, key: str) -> Any:
+		val = self.get(key)
+		if val is None and key not in ("parent", "agent_name", "prompt_hash", "hash", "state"):
+			raise KeyError(key)
+		return val
+
+	def __setitem__(self, key: str, value: Any):
+		if key == "tokens":
+			self.tokens = list(value)
+		elif key == "state":
+			self.state = value
+		elif key == "last_used":
+			self.last_used = value
+		elif key == "ema_score":
+			self.ema_score = value
+		elif key == "hit_count":
+			self.hit_count = value
+		elif key == "is_system":
+			self.is_system = value
+		elif key == "cache_id":
+			self.cache_id = value
+		elif key == "agent_name":
+			self.agent_name = value
+		elif key in ("prompt_hash", "hash"):
+			self.prompt_hash = value
+
+	def __contains__(self, key: str) -> bool:
+		return self.get(key) is not None
+
+
 class PromptCacheManager:
 	def __init__(
 		self,
@@ -254,7 +345,8 @@ class PromptCacheManager:
 		max_caches: int | None = None,
 		ttl_seconds: int | None = None,
 		half_life_seconds: int | None = None,
-		replace_tolerance: int | None = None
+		replace_tolerance: int | None = None,
+		adapter: BaseModelAdapter | None = None
 	):
 		self.cache_dir = cache_dir or PROMPT_CACHE_DIR
 		os.makedirs(self.cache_dir, exist_ok=True)
@@ -264,19 +356,64 @@ class PromptCacheManager:
 		self.ttl_seconds: int = ttl_seconds if ttl_seconds is not None else PROMPT_CACHE_TTL
 		self.half_life_seconds: float = float(half_life_seconds or PROMPT_CACHE_HALF_LIFE)
 		self.replace_tolerance: int = int(replace_tolerance if replace_tolerance is not None else PROMPT_CACHE_TOLERANCE)
+		self.adapter: BaseModelAdapter = adapter or get_adapter()
 
-		# System prompts RAM cache: hash -> cache payload dict
-		self.ram_cache: Dict[str, Dict[str, Any]] = {}
+		# Virtual root of hierarchical Radix Tree
+		self.root: CacheTreeNode = CacheTreeNode(tokens=[], state=None, is_system=True, cache_id="root")
+
+		# System prompts RAM cache: hash -> CacheTreeNode (and dict interface compatibility)
+		self.ram_cache: Dict[str, Any] = {}
 		self.agent_hash_map: Dict[str, str] = {}
 
-		# Dynamic temporal caches: list of {cache_id, tokens, token_count, state, last_used, ema_score, hit_count, is_system}
-		self.temporal_caches: List[Dict[str, Any]] = []
+		# Dynamic EOS / EOT tokens learned from active LLM and adapter
+		self.known_eos_token_ids: set[int] = set()
 
 		# In-memory caller context snapshots for delegation
 		self.ram_snapshots: Dict[str, Any] = {}
 		self.load_configured_to_ram()
 
-	def calculate_current_ema(self, entry: Dict[str, Any], now: float) -> float:
+	def init_adapter_eos(self, llm: Any):
+		"""Initializes model-specific EOS tokens from the active adapter."""
+		if llm and self.adapter:
+			self.known_eos_token_ids = self.adapter.get_eos_token_ids(llm)
+			print(f"[PromptCache] Initialized EOS tokens for adapter '{self.adapter.name}': {self.known_eos_token_ids}", flush=True)
+
+	def get_eos_token_ids(self, llm: Any = None) -> set[int]:
+		if not self.known_eos_token_ids and llm and self.adapter:
+			self.known_eos_token_ids = self.adapter.get_eos_token_ids(llm)
+		return set(self.known_eos_token_ids)
+
+	def strip_eos_tokens(self, llm: Any, tokens: List[int]) -> List[int]:
+		"""
+		Detects the first EOS / End-Of-Sequence / End-Of-Turn token in the sequence using the model's adapter.
+		Strips that token and all subsequent tokens, returning only the prefix before EOS.
+		"""
+		if not tokens:
+			return []
+
+		eos_set = self.get_eos_token_ids(llm)
+		for idx, tok in enumerate(tokens):
+			if tok in eos_set:
+				stripped_count = len(tokens) - idx
+				print(f"[PromptCache] Adapter '{self.adapter.name}' stripped EOS token ({tok}) and {stripped_count - 1} trailing tokens beyond EOS from cache.", flush=True)
+				return tokens[:idx]
+
+		return list(tokens)
+
+	def get_all_nodes(self, start_node: Optional[CacheTreeNode] = None) -> List[CacheTreeNode]:
+		node = start_node or self.root
+		res = []
+		for child in node.children:
+			res.append(child)
+			res.extend(self.get_all_nodes(child))
+		return res
+
+	@property
+	def temporal_caches(self) -> List[CacheTreeNode]:
+		"""Returns all non-system temporal nodes in the Radix Tree."""
+		return [n for n in self.get_all_nodes() if not n.is_system]
+
+	def calculate_current_ema(self, entry: CacheTreeNode | Dict[str, Any], now: float) -> float:
 		"""Calcula el score EMA actual aplicando decaimiento exponencial continuo."""
 		last_used = entry.get("last_used", now)
 		base_score = entry.get("ema_score", 1.0)
@@ -285,7 +422,7 @@ class PromptCacheManager:
 		decay = math.exp(- (0.69314718056 / max(1.0, self.half_life_seconds)) * dt)
 		return base_score * decay
 
-	def record_cache_hit(self, entry: Dict[str, Any], now: float):
+	def record_cache_hit(self, entry: CacheTreeNode | Dict[str, Any], now: float):
 		"""Incrementa el valor EMA del cache al ser reutilizado activamente."""
 		current_score = self.calculate_current_ema(entry, now)
 		entry["ema_score"] = current_score + 1.0
@@ -346,16 +483,24 @@ class PromptCacheManager:
 						continue
 
 					if prompt_hash == expected_hash and "state" in data:
-						data["is_system"] = True
-						data["last_used"] = time.time()
-						data["token_count"] = len(tokens)
-						self.ram_cache[prompt_hash] = data
+						sys_node = CacheTreeNode(
+							tokens=tokens,
+							state=data["state"],
+							is_system=True,
+							parent=self.root,
+							cache_id=f"sys_{agent_name}",
+							agent_name=agent_name,
+							prompt_hash=prompt_hash
+						)
+						sys_node.last_used = time.time()
+						self.root.children.append(sys_node)
+						self.ram_cache[prompt_hash] = sys_node
 						self.agent_hash_map[agent_name] = prompt_hash
 						loaded_count += 1
 				except Exception as e:
 					print(f"[PromptCache] Failed to load binary cache '{filepath}': {e}")
 
-		print(f"[PromptCache] Pre-loaded {loaded_count} configured binary prompt caches into RAM.")
+		print(f"[PromptCache] Pre-loaded {loaded_count} configured binary prompt caches into RAM Radix Tree.")
 
 	def remove_stale_agent_cache(self, agent_name: str, new_hash: str):
 		pattern = os.path.join(self.cache_dir, f"{agent_name}_*.bin")
@@ -441,159 +586,256 @@ class PromptCacheManager:
 
 		return list(llm.tokenize(prompt_text.encode("utf-8")))
 
+	def prune_expired_nodes(self, node: CacheTreeNode, now: float) -> bool:
+		"""
+		Post-order bottom-up pruning:
+		Prunes expired leaf nodes only if they have NO children and are NOT system prompts.
+		Returns True if this node was pruned.
+		"""
+		# 1. First prune children recursively
+		active_children = []
+		for child in node.children:
+			is_pruned = self.prune_expired_nodes(child, now)
+			if not is_pruned:
+				active_children.append(child)
+		node.children = active_children
+
+		# 2. Never prune system prompt nodes or the virtual root
+		if node.is_system or node is self.root:
+			return False
+
+		# 3. Never prune a branch that still has active children
+		if len(node.children) > 0:
+			return False
+
+		# 4. Leaf node without children: verify TTL
+		if self.ttl_seconds > 0 and (now - node.last_used) > self.ttl_seconds:
+			print(f"[PromptCache] Pruned expired leaf node '{node.cache_id}' (TTL {self.ttl_seconds}s reached).")
+			return True
+
+		return False
+
 	def clean_expired_temporals(self):
 		if self.ttl_seconds <= 0:
 			# TTL <= 0 significa tiempo infinito, la sustitucion se gestiona puramente por scoring EMA
 			return
-
 		now = time.time()
-		valid_temporals = []
-		for entry in self.temporal_caches:
-			if (now - entry.get("last_used", now)) <= self.ttl_seconds:
-				valid_temporals.append(entry)
-			else:
-				print(f"[PromptCache] Expired temporal cache '{entry.get('cache_id')}' (TTL {self.ttl_seconds}s reached).")
-		self.temporal_caches = valid_temporals
+		self.prune_expired_nodes(self.root, now)
 
 	def enforce_max_caches(self):
-		if len(self.temporal_caches) > self.max_caches:
-			now = time.time()
-			# Ordenar por EMA score ascendente: el cache con menor valor ponderado se desaloja primero
-			self.temporal_caches.sort(key=lambda c: self.calculate_current_ema(c, now))
-			excess = len(self.temporal_caches) - self.max_caches
-			removed = self.temporal_caches[:excess]
-			self.temporal_caches = self.temporal_caches[excess:]
-			for r in removed:
-				score = self.calculate_current_ema(r, now)
-				print(f"[PromptCache] Evicted low-EMA temporal cache '{r.get('cache_id')}' (score={score:.4f}, hits={r.get('hit_count', 1)}, limit {self.max_caches}).")
+		temporals = self.temporal_caches
+		if len(temporals) <= self.max_caches:
+			return
 
-	def find_best_matching_cache(self, request_tokens: List[int]) -> Tuple[Optional[Dict[str, Any]], int]:
+		now = time.time()
+		while len(self.temporal_caches) > self.max_caches:
+			# Collect only non-system leaf nodes (nodes with 0 children)
+			leaves = [n for n in self.temporal_caches if len(n.children) == 0 and not n.is_system]
+			if not leaves:
+				break
+			# Sort by lowest EMA score: el nodo hoja con menor valor ponderado se desaloja primero
+			leaves.sort(key=lambda leaf: self.calculate_current_ema(leaf, now))
+			victim = leaves[0]
+			if victim.parent and victim in victim.parent.children:
+				victim.parent.children.remove(victim)
+				score = self.calculate_current_ema(victim, now)
+				print(f"[PromptCache] Evicted low-EMA leaf node '{victim.cache_id}' (score={score:.4f}, hits={victim.hit_count}, limit {self.max_caches}).")
+			else:
+				break
+
+	def find_best_matching_node(
+		self,
+		llm: Any,
+		request_tokens: List[int]
+	) -> Tuple[Optional[CacheTreeNode], int]:
 		if not request_tokens:
 			return None, 0
 
 		self.clean_expired_temporals()
 
-		best_cache: Optional[Dict[str, Any]] = None
-		max_matched_len = 0
+		curr = self.root
+		matched_total = 0
 
-		# 1. System prompt caches (permanentes, intocables)
-		system_entries = list(self.ram_cache.values())
-		# 2. Dynamic temporal caches (compiten por EMA score)
-		candidates = system_entries + self.temporal_caches
+		while matched_total < len(request_tokens):
+			remaining_tokens = request_tokens[matched_total:]
+			next_token = remaining_tokens[0]
 
-		for entry in candidates:
-			cached_tokens = entry.get("tokens") or []
-			c_len = len(cached_tokens)
-			if c_len == 0:
+			# Find child branch starting with the same token
+			matched_child: Optional[CacheTreeNode] = None
+			for child in curr.children:
+				if child.tokens and child.tokens[0] == next_token:
+					matched_child = child
+					break
+
+			if not matched_child:
+				break
+
+			child_len = len(matched_child.tokens)
+			rem_len = len(remaining_tokens)
+			common = 0
+			while common < min(child_len, rem_len) and matched_child.tokens[common] == remaining_tokens[common]:
+				common += 1
+
+			# Case A: Exact full match of child node segment
+			if common == child_len:
+				matched_total += common
+				curr = matched_child
 				continue
 
-			prefix_match = 0
-			while prefix_match < min(c_len, len(request_tokens)) and cached_tokens[prefix_match] == request_tokens[prefix_match]:
-				prefix_match += 1
+			# Case B: Partial match within child node -> Node Split
+			if 0 < common < child_len:
+				prefix_tokens = matched_child.tokens[:common]
+				suffix_tokens = matched_child.tokens[common:]
+				matched_total += common
 
-			name = entry.get("agent_name") or entry.get("cache_id")
-			print(f"[Prefix Debug] Candidate '{name}': cached_len={c_len}, req_len={len(request_tokens)}, matched={prefix_match}/{c_len}", flush=True)
+				# Truncate and snapshot KV state for the split prefix if LLM supports it
+				split_state = None
+				if llm and hasattr(llm, "load_state") and hasattr(llm, "save_state"):
+					try:
+						llm.load_state(matched_child.state)
+						truncate_llm_state(llm, matched_total)
+						split_state = llm.save_state()
+					except Exception as e:
+						print(f"[PromptCache] Notice in node split state truncation: {e}")
 
-			# Selecciona el candidato con el prefijo comun mas largo
-			if prefix_match > max_matched_len:
-				max_matched_len = prefix_match
-				best_cache = entry
+				# Split node retains the common prefix
+				split_node = CacheTreeNode(
+					tokens=prefix_tokens,
+					state=split_state or matched_child.state,
+					is_system=matched_child.is_system,
+					parent=curr,
+					cache_id=f"{matched_child.cache_id}_split_{common}",
+					agent_name=matched_child.agent_name,
+					prompt_hash=matched_child.prompt_hash
+				)
+				split_node.last_used = matched_child.last_used
+				split_node.ema_score = matched_child.ema_score
+				split_node.hit_count = matched_child.hit_count
 
-		return best_cache, max_matched_len
+				# Daughter 1 keeps the remaining existing tokens and original children
+				hija_1 = CacheTreeNode(
+					tokens=suffix_tokens,
+					state=matched_child.state,
+					is_system=matched_child.is_system,
+					parent=split_node,
+					cache_id=f"{matched_child.cache_id}_rest",
+					agent_name=matched_child.agent_name
+				)
+				hija_1.children = matched_child.children
+				for c in hija_1.children:
+					c.parent = hija_1
+				hija_1.last_used = matched_child.last_used
+				hija_1.ema_score = matched_child.ema_score
 
-	def apply_best_cache(self, llm: Any, request_tokens: List[int], min_match: int = 16) -> Tuple[bool, Optional[Dict[str, Any]], int]:
-		best_cache, matched_count = self.find_best_matching_cache(request_tokens)
-		if best_cache and matched_count >= min_match and hasattr(llm, "load_state"):
+				split_node.children = [hija_1]
+
+				# Replace child in curr.children with split_node
+				idx = curr.children.index(matched_child)
+				curr.children[idx] = split_node
+
+				curr = split_node
+				break
+
+			# Case C: No match on first token
+			break
+
+		if curr is self.root:
+			return None, 0
+
+		return curr, matched_total
+
+	def apply_best_cache(self, llm: Any, request_tokens: List[int], min_match: int = 16) -> Tuple[bool, Optional[CacheTreeNode], int]:
+		best_node, matched_count = self.find_best_matching_node(llm, request_tokens)
+		if best_node and matched_count >= min_match and hasattr(llm, "load_state"):
 			try:
 				now = time.time()
-				llm.load_state(best_cache["state"])
-				cached_len = len(best_cache.get("tokens", []))
-				name = best_cache.get("agent_name") or best_cache.get("cache_id")
+				llm.load_state(best_node.state)
+				name = best_node.agent_name or best_node.cache_id
 
-				# Actualizar score EMA solo si es un cache temporal de dialogo
-				if not best_cache.get("is_system", False):
-					self.record_cache_hit(best_cache, now)
-					print(f"[PromptCache] Temporal cache '{name}' hit recorded (new EMA score: {best_cache.get('ema_score', 0):.2f}).", flush=True)
+				# Truncate if loaded state has more tokens than the matched prefix
+				truncate_llm_state(llm, matched_count)
+
+				if not best_node.is_system:
+					self.record_cache_hit(best_node, now)
+					print(f"[PromptCache] Radix node '{name}' hit recorded (new EMA: {best_node.ema_score:.2f}, matched: {matched_count}).", flush=True)
 				else:
-					best_cache["last_used"] = now
+					best_node.last_used = now
+					print(f"[PromptCache] Loaded Layer 1 System Prompt Radix node '{name}' ({matched_count} tokens).", flush=True)
 
-				# Si el prefijo comun es menor que la longitud del cache, desplazamos el cursor y podar KV cache
-				if matched_count < cached_len:
-					truncate_llm_state(llm, matched_count)
-					print(f"[PromptCache] Loaded cache '{name}' and trimmed cursor from {cached_len} to {matched_count} tokens.", flush=True)
-				else:
-					print(f"[PromptCache] Loaded exact 100% cache '{name}' ({matched_count} tokens).", flush=True)
-
-				return True, best_cache, matched_count
+				return True, best_node, matched_count
 			except Exception as e:
-				print(f"[PromptCache] Error loading state from best cache: {e}")
+				print(f"[PromptCache] Error loading state from best Radix node: {e}")
 		return False, None, 0
 
 	def save_or_replace_temporal_cache(
 		self,
-		used_cache: Optional[Dict[str, Any]],
+		used_cache: Optional[CacheTreeNode | Dict[str, Any]],
 		request_tokens: List[int],
 		new_state: Any
 	):
 		now = time.time()
+		request_tokens = self.strip_eos_tokens(None, request_tokens)
 		req_len = len(request_tokens)
-
-		# 1. Determinar el cache objetivo para reemplazo in-place:
-		# Primero revisamos si el used_cache califica dentro de la tolerancia de tokens
-		target_cache: Optional[Dict[str, Any]] = None
-		if used_cache and not used_cache.get("is_system", False):
-			cached_tokens = used_cache.get("tokens", [])
-			c_len = len(cached_tokens)
-			common = 0
-			while common < min(c_len, req_len) and cached_tokens[common] == request_tokens[common]:
-				common += 1
-			# Si coincide al menos el 75% y difiere a lo sumo en 'replace_tolerance' tokens al final
-			if c_len > 0 and (c_len - common) <= self.replace_tolerance and common >= int(c_len * 0.75) and req_len >= common:
-				target_cache = used_cache
-
-		# 2. Si used_cache no califico (ej: empezo en system prompt),
-		# buscamos si en la lista de temporales hay algun cache previo de la misma conversacion dentro de la tolerancia
-		if not target_cache:
-			for entry in self.temporal_caches:
-				c_tokens = entry.get("tokens", [])
-				c_len = len(c_tokens)
-				if c_len == 0:
-					continue
-				common = 0
-				while common < min(c_len, req_len) and c_tokens[common] == request_tokens[common]:
-					common += 1
-				if (c_len - common) <= self.replace_tolerance and common >= int(c_len * 0.75) and req_len >= common:
-					target_cache = entry
-					break
-
-		# 3. Reemplazo in-place si se encontro un candidato dentro del margen de tolerancia
-		if target_cache:
-			prev_len = len(target_cache.get("tokens", []))
-			target_cache["tokens"] = list(request_tokens)
-			target_cache["token_count"] = req_len
-			target_cache["state"] = new_state
-			self.record_cache_hit(target_cache, now)
-			print(
-				f"[PromptCache] Extended temporal cache '{target_cache.get('cache_id')}' in-place "
-				f"from {prev_len} to {req_len} tokens (tolerance {self.replace_tolerance}, EMA: {target_cache.get('ema_score', 0):.2f})."
-			)
+		if req_len == 0:
 			return
 
-		# 4. Si es una conversacion totalmente nueva, se registra y compite por EMA
-		cache_id = f"temporal_{int(now * 1000)}_{req_len}"
-		entry = {
-			"cache_id": cache_id,
-			"tokens": list(request_tokens),
-			"token_count": req_len,
-			"state": new_state,
-			"last_used": now,
-			"ema_score": 1.0,
-			"hit_count": 1,
-			"is_system": False
-		}
-		self.temporal_caches.append(entry)
+		target_node: Optional[CacheTreeNode] = None
+		if isinstance(used_cache, CacheTreeNode):
+			target_node = used_cache
+		elif isinstance(used_cache, dict) and "cache_id" in used_cache:
+			for node in self.get_all_nodes():
+				if node.cache_id == used_cache.get("cache_id"):
+					target_node = node
+					break
+
+		if target_node:
+			accumulated_tokens = target_node.get_path_tokens()
+			acc_len = len(accumulated_tokens)
+
+			# If target_node is a leaf, not system prompt, and request_tokens is a direct continuation
+			if len(target_node.children) == 0 and not target_node.is_system:
+				common = 0
+				while common < min(acc_len, req_len) and accumulated_tokens[common] == request_tokens[common]:
+					common += 1
+				if common >= int(acc_len * 0.75) and (acc_len - common) <= self.replace_tolerance and req_len >= common:
+					parent_acc_len = len(target_node.parent.get_path_tokens()) if target_node.parent else 0
+					new_delta = request_tokens[parent_acc_len:]
+					prev_len = len(target_node.tokens)
+					target_node.tokens = list(new_delta)
+					target_node.state = new_state
+					self.record_cache_hit(target_node, now)
+					print(f"[PromptCache] Extended leaf node '{target_node.cache_id}' in-place from {prev_len} to {len(new_delta)} tokens (EMA: {target_node.ema_score:.2f}).")
+					return
+
+			# Branching: add Daughter 2 branch under target_node
+			delta_tokens = request_tokens[acc_len:] if req_len > acc_len else []
+			if delta_tokens:
+				hija_2 = CacheTreeNode(
+					tokens=delta_tokens,
+					state=new_state,
+					is_system=False,
+					parent=target_node,
+					cache_id=f"temporal_{int(now * 1000)}_{len(delta_tokens)}"
+				)
+				target_node.children.append(hija_2)
+				self.enforce_max_caches()
+				print(f"[PromptCache] Appended daughter branch '{hija_2.cache_id}' ({len(delta_tokens)} delta tokens) under '{target_node.cache_id}'. Active temporals: {len(self.temporal_caches)}.")
+				return
+
+		# Fallback: match against tree or append under root
+		matched_node, matched_len = self.find_best_matching_node(None, request_tokens)
+		parent_node = matched_node if matched_node else self.root
+		delta = request_tokens[matched_len:] if req_len > matched_len else request_tokens
+		new_node = CacheTreeNode(
+			tokens=delta,
+			state=new_state,
+			is_system=False,
+			parent=parent_node,
+			cache_id=f"temporal_{int(now * 1000)}_{len(delta)}"
+		)
+		parent_node.children.append(new_node)
 		self.enforce_max_caches()
-		print(f"[PromptCache] Saved new temporal cache '{cache_id}' ({req_len} tokens, EMA=1.0). Active temporals: {len(self.temporal_caches)}.")
+		print(f"[PromptCache] Saved new branch '{new_node.cache_id}' ({len(delta)} tokens) under '{parent_node.cache_id}'. Active temporals: {len(self.temporal_caches)}.")
 
 	def save_cache(self, agent_name: str, prompt_text: str, state: Any, tokens: list, tools: list | None = None) -> str:
 		prompt_hash = self.compute_hash(prompt_text, tools=tools)
@@ -614,9 +856,34 @@ class PromptCacheManager:
 		try:
 			with open(filepath, "wb") as f:
 				pickle.dump(payload, f)
-			self.ram_cache[prompt_hash] = payload
+
+			# Attach or update Layer 1 System Prompt node in Radix Tree
+			existing_node = None
+			for child in self.root.children:
+				if child.prompt_hash == prompt_hash or child.agent_name == agent_name:
+					existing_node = child
+					break
+
+			if existing_node:
+				existing_node.tokens = list(tokens)
+				existing_node.state = state
+				existing_node.last_used = time.time()
+				self.ram_cache[prompt_hash] = existing_node
+			else:
+				sys_node = CacheTreeNode(
+					tokens=tokens,
+					state=state,
+					is_system=True,
+					parent=self.root,
+					cache_id=f"sys_{agent_name}",
+					agent_name=agent_name,
+					prompt_hash=prompt_hash
+				)
+				self.root.children.append(sys_node)
+				self.ram_cache[prompt_hash] = sys_node
+
 			self.agent_hash_map[agent_name] = prompt_hash
-			print(f"[PromptCache] Saved binary cache for '{agent_name}' ({prompt_hash}) to disk and RAM.")
+			print(f"[PromptCache] Saved binary cache for '{agent_name}' ({prompt_hash}) to disk and RAM Radix Tree.")
 		except Exception as e:
 			print(f"[PromptCache] Failed to save binary cache '{filepath}': {e}")
 
@@ -671,14 +938,14 @@ class PromptCacheManager:
 		self.clean_expired_temporals()
 
 		for entry in self.temporal_caches:
-			t_count = len(entry.get("tokens", []))
+			t_count = len(entry.tokens)
 			kv_mb = round(t_count * 0.125, 2)
 			total_temporal_ram_mb += kv_mb
 			temporal_snapshots.append({
-				"cache_id": entry.get("cache_id"),
+				"cache_id": entry.cache_id,
 				"tokens": t_count,
 				"total_mb": kv_mb,
-				"last_used": entry.get("last_used")
+				"last_used": entry.last_used
 			})
 
 		return {
@@ -691,3 +958,4 @@ class PromptCacheManager:
 			"max_caches": self.max_caches,
 			"ttl_seconds": self.ttl_seconds
 		}
+
