@@ -14,8 +14,113 @@ import {
 	User, 
 	Cpu,
 	FileText,
-	CheckCircle2
+	CheckCircle2,
+	GitBranch
 } from "lucide-react"
+
+function TreeNodeItem({ node, path = "root", level = 0, expandedNodes, onToggle }) {
+	const childrenKeys = node && node.children ? Object.keys(node.children) : []
+	const hasChildren = childrenKeys.length > 0
+	const isExpanded = !!expandedNodes[path]
+
+	return (
+		<div className="w-full min-w-0 max-w-full my-1">
+			<div
+				onClick={() => hasChildren && onToggle(path)}
+				className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all text-xs select-none max-w-full min-w-0 ${
+					hasChildren ? "cursor-pointer hover:bg-slate-800/60" : "cursor-default"
+				} ${
+					level === 0
+						? "bg-sky-950/40 border-sky-800/50 text-sky-200"
+						: level === 1
+						? "bg-indigo-950/30 border-indigo-800/40 text-indigo-200"
+						: "bg-slate-900/60 border-slate-800/70 text-slate-300"
+				}`}
+				style={{ marginLeft: `${Math.min(level * 16, 64)}px` }}
+			>
+				{hasChildren ? (
+					<button
+						type="button"
+						className="p-1 rounded-md bg-slate-800/80 text-sky-400 hover:bg-slate-700/80 flex-shrink-0"
+						title={isExpanded ? "Colapsar nodo" : "Expandir nodo"}
+					>
+						{isExpanded ? (
+							<ChevronDown className="w-3.5 h-3.5" />
+						) : (
+							<ChevronRight className="w-3.5 h-3.5" />
+						)}
+					</button>
+				) : (
+					<div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
+						<span className="w-1.5 h-1.5 rounded-full bg-slate-600" />
+					</div>
+				)}
+
+				<div className="flex items-center gap-2 flex-shrink-0">
+					<span className="font-semibold text-white tracking-wide">{node.name || "node"}</span>
+					<span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700/60">
+						Nivel {level}
+					</span>
+					{hasChildren && (
+						<span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-sky-950/60 border border-sky-800/50 text-sky-300">
+							{childrenKeys.length} {childrenKeys.length === 1 ? "hijo" : "hijos"}
+						</span>
+					)}
+				</div>
+
+				{/* Parameters with Horizontal Scroll to prevent screen enlargement */}
+				<div className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden whitespace-nowrap scrollbar-thin scrollbar-thumb-slate-700 py-0.5">
+					<div className="inline-flex items-center gap-2 text-[11px] text-slate-400 font-mono">
+						{node.updated_at && (
+							<span className="inline-flex items-center gap-1 bg-slate-950/70 px-2 py-0.5 rounded border border-slate-800/80">
+								<Clock className="w-3 h-3 text-slate-500" />
+								{new Date(node.updated_at * 1000).toLocaleString("es-ES", {
+									hour: "2-digit",
+									minute: "2-digit",
+									second: "2-digit",
+									day: "2-digit",
+									month: "short"
+								})}
+							</span>
+						)}
+
+						{node.data && (
+							<span className="inline-flex items-center gap-1 bg-slate-950/90 text-emerald-300 px-2 py-0.5 rounded border border-emerald-900/50">
+								<span className="text-emerald-500 font-bold">data:</span>
+								<span>{node.data}</span>
+							</span>
+						)}
+
+						{Object.entries(node)
+							.filter(([k]) => !["name", "children", "updated_at", "data"].includes(k))
+							.map(([k, v]) => (
+								<span key={k} className="inline-flex items-center gap-1 bg-slate-950/70 px-2 py-0.5 rounded border border-slate-800">
+									<span className="text-slate-500 font-semibold">{k}:</span>
+									<span>{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
+								</span>
+							))}
+					</div>
+				</div>
+			</div>
+
+			{/* Children Nodes (Collapsed by default) */}
+			{hasChildren && isExpanded && (
+				<div className="border-l border-slate-800/70 ml-3 pl-1 space-y-1 mt-1 animate-in fade-in duration-150">
+					{childrenKeys.map((k) => (
+						<TreeNodeItem
+							key={`${path}/${k}`}
+							node={node.children[k]}
+							path={`${path}/${k}`}
+							level={level + 1}
+							expandedNodes={expandedNodes}
+							onToggle={onToggle}
+						/>
+					))}
+				</div>
+			)}
+		</div>
+	)
+}
 
 export default function HistoryModal({ isOpen, onClose }) {
 	const [conversations, setConversations] = useState([])
@@ -26,6 +131,9 @@ export default function HistoryModal({ isOpen, onClose }) {
 	const [searchQuery, setSearchQuery] = useState("")
 	const [loadingConvs, setLoadingConvs] = useState(false)
 	const [loadingFiles, setLoadingFiles] = useState(false)
+	const [activeTab, setActiveTab] = useState("turns")
+	const [treeData, setTreeData] = useState(null)
+	const [expandedNodes, setExpandedNodes] = useState({})
 
 	useEffect(() => {
 		if (isOpen) {
@@ -56,14 +164,18 @@ export default function HistoryModal({ isOpen, onClose }) {
 		setSelectedSession(sessionDir)
 		setLoadingFiles(true)
 		setExpandedTurns({})
+		setExpandedNodes({})
 		try {
-			const res = await fetch(`/api/logs/conversations/${encodeURIComponent(sessionDir)}`)
-			if (res.ok) {
-				const data = await res.json()
+			const [filesRes, treeRes] = await Promise.all([
+				fetch(`/api/logs/conversations/${encodeURIComponent(sessionDir)}`),
+				fetch(`/api/logs/conversations/${encodeURIComponent(sessionDir)}/tree`)
+			])
+
+			if (filesRes.ok) {
+				const data = await filesRes.json()
 				const fileList = data.files || []
 				setFiles(fileList)
 
-				// Preload all user turns and tool logs for smooth accordion toggling
 				const contents = {}
 				await Promise.all(
 					fileList.map(async (f) => {
@@ -80,8 +192,15 @@ export default function HistoryModal({ isOpen, onClose }) {
 				)
 				setFileContents(contents)
 			}
+
+			if (treeRes.ok) {
+				const tData = await treeRes.json()
+				setTreeData(tData.tree || null)
+			} else {
+				setTreeData(null)
+			}
 		} catch (err) {
-			console.error("Error loading conversation files:", err)
+			console.error("Error loading conversation files or tree:", err)
 		} finally {
 			setLoadingFiles(false)
 		}
@@ -92,6 +211,31 @@ export default function HistoryModal({ isOpen, onClose }) {
 			...prev,
 			[turnIndex]: !prev[turnIndex]
 		}))
+	}
+
+	const toggleNode = (path) => {
+		setExpandedNodes((prev) => ({
+			...prev,
+			[path]: !prev[path]
+		}))
+	}
+
+	const collapseAllNodes = () => {
+		setExpandedNodes({})
+	}
+
+	const expandAllNodes = () => {
+		if (!treeData) return
+		const allPaths = {}
+		const traverse = (node, path) => {
+			if (!node) return
+			allPaths[path] = true
+			if (node.children) {
+				Object.keys(node.children).forEach((k) => traverse(node.children[k], `${path}/${k}`))
+			}
+		}
+		traverse(treeData, "root")
+		setExpandedNodes(allPaths)
 	}
 
 	if (!isOpen) return null
@@ -206,18 +350,98 @@ export default function HistoryModal({ isOpen, onClose }) {
 							<div className="h-full flex items-center justify-center text-slate-500 text-xs">
 								Cargando detalles de la conversación...
 							</div>
-						) : userTurnFiles.length === 0 ? (
-							<div className="h-full flex items-center justify-center text-slate-500 text-xs">
-								No hay registros de usuario en esta sesión
-							</div>
 						) : (
-							userTurnFiles.map((uf, turnIdx) => {
-								const isExpanded = !!expandedTurns[turnIdx]
-								const content = fileContents[uf.filename] || ""
+							<>
+								{/* Tab Switcher: Turnos vs TreeNode */}
+								<div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3 flex-wrap gap-2">
+									<div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-950/80 border border-slate-800">
+										<button
+											type="button"
+											onClick={() => setActiveTab("turns")}
+											className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+												activeTab === "turns"
+													? "bg-sky-600/20 text-sky-400 border border-sky-500/30 shadow-sm"
+													: "text-slate-400 hover:text-slate-200"
+											}`}
+										>
+											<History className="w-3.5 h-3.5" />
+											<span>Turnos y Auditoría ({userTurnFiles.length})</span>
+										</button>
+										<button
+											type="button"
+											onClick={() => setActiveTab("tree")}
+											className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+												activeTab === "tree"
+													? "bg-sky-600/20 text-sky-400 border border-sky-500/30 shadow-sm"
+													: "text-slate-400 hover:text-slate-200"
+											}`}
+										>
+											<GitBranch className="w-3.5 h-3.5" />
+											<span>Árbol TreeNode</span>
+										</button>
+									</div>
 
-								// Extract User Message and LLM Final response from markdown
-								const userMatch = content.match(/## 2\. Mensaje Actual del Usuario\s*>\s*(.*?)(?=\n---|\n## 3)/s)
-								const userText = userMatch ? userMatch[1].trim() : uf.filename
+									{activeTab === "tree" && treeData && (
+										<div className="flex items-center gap-2">
+											<button
+												type="button"
+												onClick={collapseAllNodes}
+												className="px-2.5 py-1 text-[11px] rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors"
+											>
+												Colapsar Todo
+											</button>
+											<button
+												type="button"
+												onClick={expandAllNodes}
+												className="px-2.5 py-1 text-[11px] rounded-lg bg-slate-900 border border-slate-800 text-sky-400 hover:bg-slate-800 transition-colors"
+											>
+												Expandir Todo
+											</button>
+										</div>
+									)}
+								</div>
+
+								{/* Active Tab View */}
+								{activeTab === "tree" ? (
+									<div className="w-full min-w-0 max-w-full overflow-hidden space-y-3">
+										<div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs text-slate-400 flex items-center justify-between flex-wrap gap-2">
+											<div className="flex items-center gap-2">
+												<Database className="w-4 h-4 text-sky-400" />
+												<span className="font-semibold text-slate-200">Estructura Jerárquica de Nodos (TreeNode RAG)</span>
+											</div>
+											<span className="text-[11px] text-slate-500 font-mono">
+												Scroll horizontal activado • Nodos colapsados por defecto
+											</span>
+										</div>
+
+										{!treeData || (!treeData.children && !treeData.name) ? (
+											<div className="p-8 text-center text-xs text-slate-500 rounded-xl bg-slate-950/40 border border-slate-800">
+												No hay estructura TreeNode registrada en esta sesión
+											</div>
+										) : (
+											<div className="w-full min-w-0 max-w-full overflow-hidden p-3 rounded-2xl bg-slate-950/40 border border-slate-800/80">
+												<TreeNodeItem
+													node={treeData}
+													path="root"
+													level={0}
+													expandedNodes={expandedNodes}
+													onToggle={toggleNode}
+												/>
+											</div>
+										)}
+									</div>
+								) : userTurnFiles.length === 0 ? (
+									<div className="h-full flex items-center justify-center text-slate-500 text-xs">
+										No hay registros de usuario en esta sesión
+									</div>
+								) : (
+									userTurnFiles.map((uf, turnIdx) => {
+										const isExpanded = !!expandedTurns[turnIdx]
+										const content = fileContents[uf.filename] || ""
+
+										// Extract User Message and LLM Final response from markdown
+										const userMatch = content.match(/## 2\. Mensaje Actual del Usuario\s*>\s*(.*?)(?=\n---|\n## 3)/s)
+										const userText = userMatch ? userMatch[1].trim() : uf.filename
 
 								const respMatch = content.match(/## 3\. Respuesta Final Generada por el LLM\s*(.*)/s)
 								const finalText = respMatch ? respMatch[1].trim() : ""
@@ -382,6 +606,8 @@ export default function HistoryModal({ isOpen, onClose }) {
 									</div>
 								)
 							})
+						)}
+							</>
 						)}
 					</main>
 				</div>

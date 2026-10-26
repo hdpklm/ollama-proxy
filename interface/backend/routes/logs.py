@@ -30,3 +30,11 @@ async def get_log_file(session_dir: str, filename: str):
 		"filename": filename,
 		"content": content
 	}
+
+@router.get("/conversations/{session_dir}/tree")
+async def get_conversation_tree(session_dir: str):
+	tree_data = conversation_logger.get_tree_structure(session_dir)
+	return {
+		"session_dir": session_dir,
+		"tree": tree_data
+	}

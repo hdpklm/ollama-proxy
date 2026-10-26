@@ -1443,3 +1443,29 @@
 	- En `backend/engine.py`: `LlamaEngine` resuelve el adaptador activo con `get_adapter(self.model_path)` e inicializa los tokens EOS en `PromptCacheManager`.
 	- En `backend/prompt_cache.py`: `PromptCacheManager` utiliza `self.adapter` para recortar tokens EOS evitando falsos positivos inter-modelo.
 	- Añadida prueba `test_adapter_eos_isolation_prevents_false_positives` en `LLM_Test/gemini/cache/test_radix_tree_cache.py` comprobando que Gemma no se confunde con tokens de Qwen y viceversa (7/7 tests superados).
+
+### 📝 Registro: [v0.9.45] - Pestaña Visualizadora de TreeNode en Historial de Conversaciones con Scroll Horizontal y Nodos Colapsados
+- **date-time**: 2026-10-26 13:35:00
+- **Problema**:
+	- En el popup web "Historial de Conversaciones y Memoria", los usuarios solo podían ver turnos planos en Markdown sin poder inspeccionar la jerarquía ramificada de memoria ni los nodos `TreeNode`.
+	- Si un nodo contenía un texto o parámetro ultra largo, existía el riesgo de desbordamiento horizontal deformando el modal o la pantalla si no se aislaba en un contenedor de scroll horizontal estricto. Además, se requería ver todos los parámetros de cada nodo y que por defecto todos aparecieran colapsados.
+- **Causa**:
+	- El componente `HistoryModal.jsx` y los endpoints de `routes/logs.py` carecían de una pestaña dedicada y de un extractor recursivo de la estructura jerárquica de árbol (`tree.json` o síntesis de turnos).
+- **Solución**:
+	- En `interface/backend/services/conversation_logger.py`: se implementó la función `get_tree_structure(session_dir)` para recuperar el árbol jerárquico desde `tree.json` persistido por la sesión, o sintetizarlo automáticamente agrupando turnos de usuario con sus parámetros temporales y de contexto.
+	- En `interface/backend/routes/logs.py`: se añadió el endpoint `GET /api/logs/conversations/{session_dir}/tree` que devuelve la estructura jerárquica de nodos.
+	- En `interface/frontend/src/components/HistoryModal.jsx`:
+		1. Se incorporó un conmutador de pestañas ("Turnos y Auditoría" y "Árbol TreeNode").
+		2. Se diseñó el componente recursivo `TreeNodeItem` con contenedor `overflow-x-auto whitespace-nowrap min-w-0 max-w-full` para que los textos o datos ultra largos tengan desplazamiento horizontal autónomo sin alterar el ancho del modal.
+		3. Se muestran todos los parámetros de cada nodo: nombre, nivel de profundidad, contador de hijos, `updated_at`, `data` y cualquier propiedad o metadata adicional.
+		4. Todos los nodos se inician colapsados por defecto (`expandedNodes: {}`), acompañados de botones utilitarios para "Colapsar Todo" y "Expandir Todo".
+
+### 📝 Registro: [v0.9.46] - Corrección de Cierre de Fragmento JSX en HistoryModal
+- **date-time**: 2026-10-26 13:42:00
+- **Problema**:
+	- Al ejecutar `pnpm build` en `interface/frontend`, Vite/esbuild fallaba con el error `Unexpected closing "main" tag does not match opening fragment tag` y `Unterminated regular expression` en `HistoryModal.jsx:610`.
+- **Causa**:
+	- Al introducir el selector de pestañas entre "Turnos" y "TreeNode", se abrió un fragmento JSX `<>` para envolver la cabecera y el cuerpo condicional del panel derecho, pero faltaba el cierre `</>` y la clausura del ternario externo antes de `</main>`, desalineando la jerarquía de etiquetas JSX.
+- **Solución**:
+	- En `interface/frontend/src/components/HistoryModal.jsx`: se añadió la etiqueta de cierre `</>` del fragmento y se restauró el `</div>` del contenedor del acordeón del turno, cerrando correctamente los ternarios antes de `</main>`.
+	- Verificada la compilación con éxito mediante `cmd /c pnpm --prefix interface/frontend build` (1530 módulos transformados, 0 errores, tiempo: 6.41s).
