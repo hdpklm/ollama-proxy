@@ -1500,3 +1500,15 @@
 		2. Se implementó el manejador `handleWheel` en el contenedor de parámetros que traduce el movimiento de la rueda del ratón (`deltaY`) directamente a `scrollLeft`, permitiendo scroll horizontal suave e instantáneo simplemente rodando el ratón sobre la fila.
 		3. Se aplicó `.horizontal-scroll-container` tanto a cada fila de parámetros como al contenedor general de la tarjeta del árbol (`overflow-x-auto p-3.5`).
 	- Verificada la compilación exitosa del frontend (`pnpm build` en 3.30s).
+
+### 📝 Registro: [v0.9.49] - Unificación del Scroll Horizontal Exclusivo en la Caja Contenedora del Árbol TreeNode
+- **date-time**: 2026-10-26 15:14:00
+- **Problema**:
+	- Se generaban dos scrollbars horizontales simultáneos: uno general en toda la tarjeta del árbol y otro diminuto de apenas ~10px dentro del contenedor de parámetros de cada fila individual, que en dispositivos móviles resultaba ilegible y difícil de manipular.
+- **Causa**:
+	- Cada fila `TreeNodeItem` mantenía un contenedor interno con `overflow-x-auto` además del scroll global de la tarjeta exterior.
+- **Solución**:
+	- En `interface/frontend/src/components/HistoryModal.jsx`:
+		1. Se eliminó el scroll horizontal interno de cada fila (`TreeNodeItem`), permitiendo que los parámetros y badges se desplieguen naturalmente en una sola línea continua con `whitespace-nowrap` y `w-fit min-w-full`.
+		2. Se mantuvo exclusivamente el scroll horizontal general de toda la caja contenedora del árbol (`overflow-x-auto horizontal-scroll-container` con `min-w-max`), permitiendo que el usuario se desplace horizontalmente a lo largo de toda la estructura de forma uniforme y cómoda tanto en móvil como en escritorio.
+	- Frontend compilado con éxito (`pnpm build` en 6.61s).

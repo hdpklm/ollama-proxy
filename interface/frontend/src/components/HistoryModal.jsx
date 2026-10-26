@@ -23,16 +23,10 @@ function TreeNodeItem({ node, path = "root", level = 0, expandedNodes, onToggle 
 	const hasChildren = childrenKeys.length > 0
 	const isExpanded = !!expandedNodes[path]
 
-	const handleWheel = (e) => {
-		if (e.deltaY !== 0) {
-			e.currentTarget.scrollLeft += e.deltaY
-		}
-	}
-
 	return (
-		<div className="w-full min-w-0 max-w-full my-1">
+		<div className="w-fit min-w-full my-1">
 			<div
-				className={`flex items-center gap-2 p-2 rounded-xl border transition-all text-xs max-w-full min-w-0 ${
+				className={`flex items-center gap-2 p-2 rounded-xl border transition-all text-xs w-fit min-w-full whitespace-nowrap ${
 					level === 0
 						? "bg-sky-950/40 border-sky-800/50 text-sky-200"
 						: level === 1
@@ -77,42 +71,39 @@ function TreeNodeItem({ node, path = "root", level = 0, expandedNodes, onToggle 
 					)}
 				</div>
 
-				{/* Parameters with Active Horizontal Scroll & Mouse Wheel */}
+				{/* Parameters displayed cleanly without internal scrollbar */}
 				<div
 					onClick={(e) => e.stopPropagation()}
-					onWheel={handleWheel}
-					className="flex-1 min-w-0 horizontal-scroll-container overflow-x-auto whitespace-nowrap py-1 px-2 bg-slate-950/70 rounded-lg border border-slate-800/80 select-text cursor-default"
+					className="flex items-center gap-2 text-[11px] text-slate-400 font-mono select-text py-0.5 px-2 bg-slate-950/70 rounded-lg border border-slate-800/80 flex-shrink-0"
 				>
-					<div className="inline-flex items-center gap-2 text-[11px] text-slate-400 font-mono">
-						{node.updated_at && (
-							<span className="inline-flex items-center gap-1 bg-slate-900/90 text-slate-300 px-2 py-0.5 rounded border border-slate-800 flex-shrink-0">
-								<Clock className="w-3 h-3 text-slate-500" />
-								{new Date(node.updated_at * 1000).toLocaleString("es-ES", {
-									hour: "2-digit",
-									minute: "2-digit",
-									second: "2-digit",
-									day: "2-digit",
-									month: "short"
-								})}
-							</span>
-						)}
+					{node.updated_at && (
+						<span className="inline-flex items-center gap-1 bg-slate-900/90 text-slate-300 px-2 py-0.5 rounded border border-slate-800 flex-shrink-0">
+							<Clock className="w-3 h-3 text-slate-500" />
+							{new Date(node.updated_at * 1000).toLocaleString("es-ES", {
+								hour: "2-digit",
+								minute: "2-digit",
+								second: "2-digit",
+								day: "2-digit",
+								month: "short"
+							})}
+						</span>
+					)}
 
-						{node.data && (
-							<span className="inline-flex items-center gap-1 bg-slate-900/90 text-emerald-300 px-2 py-0.5 rounded border border-emerald-900/50 flex-shrink-0">
-								<span className="text-emerald-500 font-bold">data:</span>
-								<span>{node.data}</span>
-							</span>
-						)}
+					{node.data && (
+						<span className="inline-flex items-center gap-1 bg-slate-900/90 text-emerald-300 px-2 py-0.5 rounded border border-emerald-900/50 flex-shrink-0">
+							<span className="text-emerald-500 font-bold">data:</span>
+							<span>{node.data}</span>
+						</span>
+					)}
 
-						{Object.entries(node)
-							.filter(([k]) => !["name", "children", "updated_at", "data"].includes(k))
-							.map(([k, v]) => (
-								<span key={k} className="inline-flex items-center gap-1 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800 text-slate-300 flex-shrink-0">
-									<span className="text-slate-500 font-semibold">{k}:</span>
-									<span>{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
-								</span>
-							))}
-					</div>
+					{Object.entries(node)
+						.filter(([k]) => !["name", "children", "updated_at", "data"].includes(k))
+						.map(([k, v]) => (
+							<span key={k} className="inline-flex items-center gap-1 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800 text-slate-300 flex-shrink-0">
+								<span className="text-slate-500 font-semibold">{k}:</span>
+								<span>{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
+							</span>
+						))}
 				</div>
 			</div>
 
@@ -558,7 +549,7 @@ export default function HistoryModal({ isOpen, onClose }) {
 											</div>
 										) : (
 											<div className="w-full min-w-0 max-w-full overflow-x-auto p-3.5 rounded-2xl bg-slate-950/40 border border-slate-800/80 horizontal-scroll-container">
-												<div className="w-full min-w-0">
+												<div className="w-full min-w-max space-y-1">
 													<TreeNodeItem
 														node={treeData}
 														path="root"
