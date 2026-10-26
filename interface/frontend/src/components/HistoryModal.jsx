@@ -133,13 +133,59 @@ export default function HistoryModal({ isOpen, onClose }) {
 	const [loadingFiles, setLoadingFiles] = useState(false)
 	const [activeTab, setActiveTab] = useState("turns")
 	const [treeData, setTreeData] = useState(null)
+	const [sessionTreeData, setSessionTreeData] = useState(null)
+	const [globalTreeData, setGlobalTreeData] = useState(null)
+	const [treeSource, setTreeSource] = useState("global")
 	const [expandedNodes, setExpandedNodes] = useState({})
 
 	useEffect(() => {
 		if (isOpen) {
 			loadConversations()
+			loadGlobalMemory()
 		}
 	}, [isOpen])
+
+	const loadGlobalMemory = async () => {
+		setLoadingFiles(true)
+		try {
+			const res = await fetch("/api/logs/memory/current")
+			if (res.ok) {
+				const data = await res.json()
+				const gTree = data.tree || null
+				setGlobalTreeData(gTree)
+				setTreeData(gTree)
+				setTreeSource("global")
+				return gTree
+			}
+		} catch (err) {
+			console.error("Error loading global memory tree:", err)
+		} finally {
+			setLoadingFiles(false)
+		}
+		return null
+	}
+
+	const selectGlobalMemory = async () => {
+		setSelectedSession("GLOBAL")
+		setActiveTab("tree")
+		setTreeSource("global")
+		setExpandedNodes({})
+		await loadGlobalMemory()
+	}
+
+	const showGlobalTree = () => {
+		setTreeSource("global")
+		if (globalTreeData) {
+			setTreeData(globalTreeData)
+		} else {
+			loadGlobalMemory()
+		}
+	}
+
+	const showSessionTree = () => {
+		setTreeSource("session")
+		setTreeData(sessionTreeData)
+	}
 
 	const loadConversations = async () => {
 		setLoadingConvs(true)
@@ -195,9 +241,16 @@ export default function HistoryModal({ isOpen, onClose }) {
 
 			if (treeRes.ok) {
 				const tData = await treeRes.json()
-				setTreeData(tData.tree || null)
+				const sTree = tData.tree || null
+				setSessionTreeData(sTree)
+				if (treeSource === "session") {
+					setTreeData(sTree)
+				}
 			} else {
-				setTreeData(null)
+				setSessionTreeData(null)
+				if (treeSource === "session") {
+					setTreeData(null)
+				}
 			}
 		} catch (err) {
 			console.error("Error loading conversation files or tree:", err)
@@ -303,6 +356,32 @@ export default function HistoryModal({ isOpen, onClose }) {
 							</div>
 						</div>
 
+						{/* Persistent Item: Global Live Memory */}
+						<div className="p-2 border-b border-slate-800/80">
+							<button
+								type="button"
+								onClick={selectGlobalMemory}
+								className={`w-full text-left p-2.5 rounded-2xl transition-all border flex items-center justify-between ${
+									selectedSession === "GLOBAL"
+										? "bg-sky-600/25 border-sky-500/60 text-white shadow-md ring-1 ring-sky-500/30"
+										: "bg-slate-950/80 hover:bg-slate-800/80 border-slate-800 text-slate-300"
+								}`}
+							>
+								<div className="flex items-center gap-2.5 min-w-0">
+									<div className="w-8 h-8 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-400 flex-shrink-0">
+										<Database className="w-4 h-4" />
+									</div>
+									<div className="min-w-0">
+										<p className="text-xs font-semibold text-white truncate">Memoria Global Actual</p>
+										<p className="text-[10px] text-slate-400 truncate">KV Cache Radix Tree & RAG</p>
+									</div>
+								</div>
+								<span className="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex-shrink-0">
+									EN VIVO
+								</span>
+							</button>
+						</div>
+
 						{/* Conversations Scrollable List */}
 						<div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1.5">
 							{loadingConvs ? (
@@ -344,11 +423,11 @@ export default function HistoryModal({ isOpen, onClose }) {
 					<main className="flex-1 min-h-0 h-full overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-900/50 select-text">
 						{!selectedSession ? (
 							<div className="h-full flex items-center justify-center text-slate-500 text-xs">
-								Selecciona una conversación del lateral izquierdo
+								Selecciona una conversación del lateral izquierdo o la Memoria Global Actual
 							</div>
 						) : loadingFiles ? (
 							<div className="h-full flex items-center justify-center text-slate-500 text-xs">
-								Cargando detalles de la conversación...
+								Cargando estructura de memoria...
 							</div>
 						) : (
 							<>
@@ -365,7 +444,7 @@ export default function HistoryModal({ isOpen, onClose }) {
 											}`}
 										>
 											<History className="w-3.5 h-3.5" />
-											<span>Turnos y Auditoría ({userTurnFiles.length})</span>
+											<span>Turnos y Auditoría ({selectedSession === "GLOBAL" ? 0 : userTurnFiles.length})</span>
 										</button>
 										<button
 											type="button"
@@ -381,22 +460,56 @@ export default function HistoryModal({ isOpen, onClose }) {
 										</button>
 									</div>
 
-									{activeTab === "tree" && treeData && (
-										<div className="flex items-center gap-2">
-											<button
-												type="button"
-												onClick={collapseAllNodes}
-												className="px-2.5 py-1 text-[11px] rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors"
-											>
-												Colapsar Todo
-											</button>
-											<button
-												type="button"
-												onClick={expandAllNodes}
-												className="px-2.5 py-1 text-[11px] rounded-lg bg-slate-900 border border-slate-800 text-sky-400 hover:bg-slate-800 transition-colors"
-											>
-												Expandir Todo
-											</button>
+									{activeTab === "tree" && (
+										<div className="flex items-center gap-2 flex-wrap">
+											{/* Source Switcher: Global vs Session */}
+											<div className="flex items-center gap-1 p-1 rounded-xl bg-slate-950/80 border border-slate-800">
+												<button
+													type="button"
+													onClick={showGlobalTree}
+													className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg transition-all ${
+														treeSource === "global"
+															? "bg-sky-600/25 text-sky-300 font-semibold border border-sky-500/40 shadow-sm"
+															: "text-slate-400 hover:text-white"
+													}`}
+												>
+													<Database className="w-3.5 h-3.5 text-sky-400" />
+													<span>Global (En Vivo)</span>
+												</button>
+												{selectedSession && selectedSession !== "GLOBAL" && (
+													<button
+														type="button"
+														onClick={showSessionTree}
+														className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg transition-all ${
+															treeSource === "session"
+																? "bg-indigo-600/25 text-indigo-300 font-semibold border border-indigo-500/40 shadow-sm"
+																: "text-slate-400 hover:text-white"
+														}`}
+													>
+														<GitBranch className="w-3.5 h-3.5 text-indigo-400" />
+														<span>Sesión Seleccionada</span>
+													</button>
+												)}
+											</div>
+
+											{treeData && (
+												<div className="flex items-center gap-1.5">
+													<button
+														type="button"
+														onClick={collapseAllNodes}
+														className="px-2.5 py-1 text-[11px] rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-colors"
+													>
+														Colapsar Todo
+													</button>
+													<button
+														type="button"
+														onClick={expandAllNodes}
+														className="px-2.5 py-1 text-[11px] rounded-lg bg-slate-900 border border-slate-800 text-sky-400 hover:bg-slate-800 transition-colors"
+													>
+														Expandir Todo
+													</button>
+												</div>
+											)}
 										</div>
 									)}
 								</div>
@@ -407,7 +520,11 @@ export default function HistoryModal({ isOpen, onClose }) {
 										<div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs text-slate-400 flex items-center justify-between flex-wrap gap-2">
 											<div className="flex items-center gap-2">
 												<Database className="w-4 h-4 text-sky-400" />
-												<span className="font-semibold text-slate-200">Estructura Jerárquica de Nodos (TreeNode RAG)</span>
+												<span className="font-semibold text-slate-200">
+													{treeSource === "global"
+														? "Estado Global de la Memoria en Tiempo Real (KV Cache Radix Tree & RAG)"
+														: "Estructura Jerárquica de Nodos de la Sesión"}
+												</span>
 											</div>
 											<span className="text-[11px] text-slate-500 font-mono">
 												Scroll horizontal activado • Nodos colapsados por defecto
@@ -415,8 +532,16 @@ export default function HistoryModal({ isOpen, onClose }) {
 										</div>
 
 										{!treeData || (!treeData.children && !treeData.name) ? (
-											<div className="p-8 text-center text-xs text-slate-500 rounded-xl bg-slate-950/40 border border-slate-800">
-												No hay estructura TreeNode registrada en esta sesión
+											<div className="p-8 text-center text-xs text-slate-500 rounded-xl bg-slate-950/40 border border-slate-800 space-y-3">
+												<p>No hay estructura TreeNode registrada en esta sesión específica.</p>
+												<button
+													type="button"
+													onClick={loadGlobalMemory}
+													className="px-3 py-1.5 rounded-xl bg-sky-600/20 text-sky-400 border border-sky-500/40 text-xs font-semibold hover:bg-sky-600/30 transition-all inline-flex items-center gap-2"
+												>
+													<Database className="w-3.5 h-3.5" />
+													<span>Ver Memoria Global Actual (En Vivo / RAM)</span>
+												</button>
 											</div>
 										) : (
 											<div className="w-full min-w-0 max-w-full overflow-hidden p-3 rounded-2xl bg-slate-950/40 border border-slate-800/80">
@@ -429,6 +554,21 @@ export default function HistoryModal({ isOpen, onClose }) {
 												/>
 											</div>
 										)}
+									</div>
+								) : selectedSession === "GLOBAL" ? (
+									<div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
+										<Database className="w-10 h-10 text-sky-400" />
+										<p className="text-sm font-semibold text-white">Modo Memoria Global Actual (En Vivo / RAM)</p>
+										<p className="text-xs text-slate-400 max-w-md">
+											Estás inspeccionando la memoria en tiempo real. Abre la pestaña <span className="text-sky-400 font-semibold">"Árbol TreeNode"</span> para ver la jerarquía del Radix Tree en RAM y contexto RAG, o selecciona un chat del lateral para auditar turnos Markdown históricos.
+										</p>
+										<button
+											type="button"
+											onClick={() => setActiveTab("tree")}
+											className="px-4 py-2 rounded-xl bg-sky-600/20 text-sky-400 border border-sky-500/40 text-xs font-semibold hover:bg-sky-600/30 transition-all"
+										>
+											Ver Árbol TreeNode En Vivo
+										</button>
 									</div>
 								) : userTurnFiles.length === 0 ? (
 									<div className="h-full flex items-center justify-center text-slate-500 text-xs">

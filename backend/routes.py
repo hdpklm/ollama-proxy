@@ -162,6 +162,15 @@ async def get_system_memory(request: Request):
 	return engine.get_memory_stats(scheduler=scheduler)
 
 
+@router.get("/system/cache/tree")
+@api_router.get("/api/system/cache/tree")
+async def get_system_cache_tree(request: Request):
+	engine = getattr(request.app.state, "engine", None)
+	if not engine or not getattr(engine, "prompt_cache", None):
+		raise HTTPException(status_code=503, detail="Prompt cache not initialized")
+	return engine.prompt_cache.get_tree_structure()
+
+
 @api_router.post("/api/generate")
 async def api_generate(request: Request):
 	body = await request.json()

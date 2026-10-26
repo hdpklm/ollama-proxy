@@ -195,6 +195,25 @@ class TestRadixTreeCache(unittest.TestCase):
 		# And should NOT strip on Gemma's 107
 		self.assertEqual(qwen_mgr.strip_eos_tokens(qwen_llm, [10, 20, 107, 30]), [10, 20, 107, 30])
 
+	def test_tree_structure_serialization(self):
+		sys_node = CacheTreeNode(tokens=[10, 20, 30], state="sys_state", is_system=True, agent_name="assistant")
+		self.mgr.root.children.append(sys_node)
+		child_node = CacheTreeNode(tokens=[40, 50], state="child_state", is_system=False, parent=sys_node, cache_id="branch_1")
+		sys_node.children.append(child_node)
+
+		tree_dict = self.mgr.get_tree_structure()
+		self.assertIn("name", tree_dict)
+		self.assertIn("children", tree_dict)
+		self.assertIn("assistant", tree_dict["children"])
+		sys_dict = tree_dict["children"]["assistant"]
+		self.assertTrue(sys_dict["is_system"])
+		self.assertEqual(sys_dict["token_count"], 3)
+		self.assertIn("branch_1", sys_dict["children"])
+		child_dict = sys_dict["children"]["branch_1"]
+		self.assertFalse(child_dict["is_system"])
+		self.assertEqual(child_dict["token_count"], 2)
+
 
 if __name__ == "__main__":
 	unittest.main()
+

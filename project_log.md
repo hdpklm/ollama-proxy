@@ -1469,3 +1469,20 @@
 - **Solución**:
 	- En `interface/frontend/src/components/HistoryModal.jsx`: se añadió la etiqueta de cierre `</>` del fragmento y se restauró el `</div>` del contenedor del acordeón del turno, cerrando correctamente los ternarios antes de `</main>`.
 	- Verificada la compilación con éxito mediante `cmd /c pnpm --prefix interface/frontend build` (1530 módulos transformados, 0 errores, tiempo: 6.41s).
+
+### 📝 Registro: [v0.9.47] - Visualización del Estado Global de la Memoria Actual en Vivo (KV Cache Radix Tree y RAG)
+- **date-time**: 2026-10-26 13:58:00
+- **Problema**:
+	- En el popup "Historial de Conversaciones y Memoria", la pestaña "Árbol TreeNode" mostraba "No hay estructura TreeNode registrada en esta sesión" porque solo consultaba los logs de la sesión seleccionada en el sidebar, impidiendo al usuario ver el estado global actual y en tiempo real de la memoria RAM y del Radix Tree.
+- **Causa**:
+	- No existía un canal directo para consultar la jerarquía de memoria en vivo desde el proxy LLM (`CacheTreeNode` en RAM) ni un conmutador en la interfaz para alternar entre la memoria global actual y la sesión histórica elegida.
+- **Solución**:
+	- En `backend/prompt_cache.py`: se implementó el método `to_dict()` recursivo en `CacheTreeNode` (exportando nombre, tokens, resumen de EMA/hits, flags `is_system`, marcas de tiempo y ramas hijas) y el método `get_tree_structure()` en `PromptCacheManager`.
+	- En `backend/routes.py`: se expuso el endpoint `GET /system/cache/tree` y `GET /api/system/cache/tree` para servir la jerarquía completa del Radix Tree en vivo.
+	- En `backend/engine.py`: se integró la estructura de árbol en `get_memory_stats()`.
+	- En `interface/backend/routes/logs.py`: se añadió el endpoint `GET /api/logs/memory/current` (y alias `/api/logs/memory/tree/current`), el cual consolida en un único árbol raíz en tiempo real tanto el Radix KV Cache de la RAM del proxy como la memoria contextual RAG activa de Redis.
+	- En `interface/frontend/src/components/HistoryModal.jsx`:
+		1. Se añadió un botón fijo y prioritario en la parte superior del listado lateral: `"🌐 Memoria Global Actual (En Vivo / RAM)"` con indicador de pulso en vivo.
+		2. En la pestaña "Árbol TreeNode", se incorporó un selector de origen para conmutar al instante entre `"Global (En Vivo)"` y `"Sesión Seleccionada"`.
+		3. Se protegió el estado vacío para que, si una sesión histórica carece de árbol guardado, ofrezca un botón directo para saltar a la memoria global actual.
+	- Validada la serialización con una nueva prueba unitaria `test_tree_structure_serialization` en `LLM_Test/gemini/cache/test_radix_tree_cache.py` (8/8 tests OK en 0.031s) y compilación exitosa del frontend (`pnpm build` en 5.03s).

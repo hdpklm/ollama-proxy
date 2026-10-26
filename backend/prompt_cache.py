@@ -336,6 +336,28 @@ class CacheTreeNode:
 	def __contains__(self, key: str) -> bool:
 		return self.get(key) is not None
 
+	def to_dict(self) -> dict:
+		data_summary = f"tokens: {len(self.tokens)}, ema: {self.ema_score:.2f}, hits: {self.hit_count}, is_sys: {self.is_system}"
+		if self.agent_name:
+			data_summary += f", agent: {self.agent_name}"
+		return {
+			"name": self.agent_name or self.cache_id,
+			"cache_id": self.cache_id,
+			"agent_name": self.agent_name,
+			"is_system": self.is_system,
+			"token_count": len(self.tokens),
+			"tokens_sample": self.tokens[:15] if len(self.tokens) > 15 else self.tokens,
+			"data": data_summary,
+			"hit_count": self.hit_count,
+			"ema_score": round(self.ema_score, 4),
+			"last_used": self.last_used,
+			"updated_at": self.last_used,
+			"children": {
+				(child.agent_name or child.cache_id): child.to_dict()
+				for child in self.children
+			}
+		}
+
 
 class PromptCacheManager:
 	def __init__(
@@ -958,4 +980,11 @@ class PromptCacheManager:
 			"max_caches": self.max_caches,
 			"ttl_seconds": self.ttl_seconds
 		}
+
+	def get_tree_structure(self) -> dict:
+		root_dict = self.root.to_dict()
+		root_dict["name"] = "Radix Tree (KV Cache RAM)"
+		root_dict["data"] = f"Total System Prompts: {len(self.root.children)}, Max Caches: {self.max_caches}, TTL: {self.ttl_seconds}s"
+		return root_dict
+
 

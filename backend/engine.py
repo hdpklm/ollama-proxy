@@ -290,6 +290,7 @@ class LlamaEngine:
 				"total_allocated_kv_mb": round(high_max_kv_mb + low_max_kv_mb, 2)
 			},
 			"prompt_cache": cache_breakdown,
+			"tree": self.prompt_cache.get_tree_structure(),
 			"summary": {
 				"total_ram_rss_mb": rss_mb,
 				"model_weights_mb": model_size_mb,
