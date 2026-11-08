@@ -78,14 +78,14 @@ El registro del sistema (`journalctl -b -1`) reveló el motivo por el cual la Ra
    Impide que el SSD Netac 250GB entre en los modos defectuosos `ps 3` (10 ms) y `ps 4` (45 ms).
    *Verificado en arranque activo*: `nvme_core.default_ps_max_latency_us=0` cargado por el kernel.
 
-2. **Fijación de PCIe en Gen 2 Seguro (5.0 GT/s)**:
+2. **PCIe en Gen 3 de Alta Velocidad (8.0 GT/s)**:
    En `/boot/firmware/config.txt`:
    ```ini
    [all]
    dtparam=pciex1
-   dtparam=pciex1_gen=2
+   dtparam=pciex1_gen=3
    ```
-   *Verificado en dmesg*: `brcm-pcie 1000110000.pcie: link up, 5.0 GT/s PCIe x1`. No hay errores de enlace ni interferencias de alta frecuencia con Wi-Fi.
+   *Rendimiento*: ~850 MB/s de lectura sostenida. Con APST desactivado (`nvme_core.default_ps_max_latency_us=0`), el disco Netac opera de forma continua en modos operacionales de alto rendimiento (`ps 0-2`), sin caer en las suspensiones profundas defectuosas.
 
 ---
 

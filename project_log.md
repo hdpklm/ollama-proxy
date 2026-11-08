@@ -1405,7 +1405,115 @@
 		3. Creada una rejilla compacta de 3 columnas (Prompt/Input, Generación/Output, KV Cache & RAM) mostrando tokens, velocidades (t/s) y duraciones de forma alineada y legible.
 		4. Si no se usan herramientas externas, se sustituye la caja gris vacía por una línea discreta y minimalista ("Inferencia pura / sin herramientas").
 
-### 📝 Registro: [v0.9.42] - Documentacion y ajustes del sistema RPi5 (Wi-Fi, Logs y SSH)
+### 📝 Registro: [v0.9.42] - Motor de Cache Radix Tree Jerárquico por Capas con Node Splitting y Poda Post-Orden
+- **date-time**: 2026-10-26 13:01:00
+- **Problema**:
+	- El caché anterior utilizaba un mapeo plano en memoria donde cada entrada guardaba tokens completos y estados completos, provocando duplicación redundante en RAM cuando múltiples peticiones compartían el mismo system prompt o prefijos idénticos de tokens.
+	- Se requería una estructura jerárquica en capas (`TreeNode`) que almacene deltas de tokens y cachés fragmentados, con división dinámica de nodos (*node splitting*) ante coincidencias parciales, protección permanente e incondicional de los System Prompts (`is_system=True`), y poda estricta en post-orden exclusiva de hojas (*leaf-first*) para no eliminar nunca una rama con hijos activos.
+- **Causa**:
+	- La ausencia de una jerarquía de árbol impedía compartir sub-ramas de tokens entre diálogos divergentes y forzaba el desalojo tosco o la sobreescritura de cachés que aún compartían raíces válidas.
+- **Solución**:
+	- Se implementó la clase `CacheTreeNode` en `backend/prompt_cache.py` con interfaz compatible con diccionarios (`get`, `__getitem__`, `__setitem__`), punteros a padre/hijos (`parent`, `children`), flag de permanencia `is_system`, métricas EMA y acceso a tokens de ruta completa (`get_path_tokens()`).
+	- Se reestructuró `PromptCacheManager` en un árbol Radix con nodo raíz virtual `self.root`. La Capa 1 aloja exclusivamente los System Prompts como nodos permanentes inmunes a cualquier desalojo.
+	- Se diseñó el algoritmo de búsqueda de prefijos con partición de nodos (*node splitting*): ante coincidencia parcial de $M < N$ tokens, el nodo se divide en un prefijo intermedio recortado y una rama hija 1 con el resto del contenido existente. Al terminar la inferencia, la nueva generación se cuelga como rama hija 2 hermana de la anterior.
+	- Se implementó el sistema de poda por TTL en post-orden (`prune_expired_nodes`), garantizando que primero se eliminan las hojas expiradas y que ninguna rama con hijos activos sea podada jamás, podando a los padres solo cuando queden sin hijos y su propio TTL haya vencido.
+	- Se actualizó `enforce_max_caches` para desalojar exclusivamente nodos hoja no-sistema basándose en score ponderado EMA.
+	- Se crearon pruebas unitarias exhaustivas en `LLM_Test/gemini/cache/test_radix_tree_cache.py` validando la jerarquía, división de ramas, persistencia de system prompts y poda estricta ascendente.
+
+### 📝 Registro: [v0.9.43] - Truncado y Filtrado Estricto de Tokens EOS y Secuencias Posteriores en el Cache
+- **date-time**: 2026-10-26 13:09:30
+- **Problema**:
+	- Al finalizar una generación, el token de fin de secuencia (EOS / `<end_of_turn>` / `</s>` / `<|im_end|>`) y eventuales tokens espurios generados después del EOS quedaban incluidos en la secuencia de tokens y en el estado KV persistido en el caché del árbol Radix.
+- **Causa**:
+	- El formateador y la concatenación de turnos acumulaban el texto completo del turno del asistente sin recortar el delimitador de parada ni retroceder el cursor del KV cache en el motor C++ de Llama.
+- **Solución**:
+	- En `backend/prompt_cache.py`: implementados los métodos `get_eos_token_ids(llm)` y `strip_eos_tokens(llm, tokens)` para detectar dinámicamente los IDs de EOS según el modelo activo y recortar cualquier token a partir del primer EOS detectado.
+	- En `backend/engine.py`: en `_wrap_stream_with_cache_update`, antes de invocar `llm.save_state()`, se filtran los tokens con `strip_eos_tokens`. Si se detecta un EOS, se invoca `truncate_llm_state(llm, len(clean_turn_tokens))` para sincronizar el estado interno del modelo C++ antes de capturar el snapshot, garantizando que ni el EOS ni tokens posteriores contaminen el árbol o la RAM.
+	- Añadida prueba unitaria `test_strip_eos_and_subsequent_tokens` en `LLM_Test/gemini/cache/test_radix_tree_cache.py` validando el descarte del EOS y de cualquier token posterior (6/6 tests superados).
+
+### 📝 Registro: [v0.9.44] - Arquitectura de Adaptadores de Modelo para backend/ y Aislamiento de Tokens EOS por Dialecto
+- **date-time**: 2026-10-26 13:26:00
+- **Problema**:
+	- El motor de inferencia y caché de `backend/` no disponía de los adaptadores de modelo dentro de su propio namespace de contenedor (estaban restringidos a `interface/`), y la detección de EOS corría riesgo de generar falsos positivos si se usaban conjuntos genéricos de IDs entre familias de modelos distintas (ej: Gemma vs Qwen vs LLaMA).
+- **Causa**:
+	- El contenedor `ollama-proxy` monta y empaqueta exclusivamente `backend/` y `main.py`, sin acceso a `interface/backend/services/adapters`.
+- **Solución**:
+	- Se creó el módulo de adaptadores en `backend/adapters/` (`base.py`, `gemma4.py`, `qwen.py`, `openai.py`, `registry.py`, `__init__.py`) disponible directamente en el contenedor del proxy.
+	- Cada adaptador define sus delimitadores exactos (`eos_tokens`), como `<end_of_turn>` en Gemma y `<|im_end|>` en Qwen, y provee el método `get_eos_token_ids(llm)` para extraer única y exclusivamente los token IDs del modelo en ejecución.
+	- En `backend/engine.py`: `LlamaEngine` resuelve el adaptador activo con `get_adapter(self.model_path)` e inicializa los tokens EOS en `PromptCacheManager`.
+	- En `backend/prompt_cache.py`: `PromptCacheManager` utiliza `self.adapter` para recortar tokens EOS evitando falsos positivos inter-modelo.
+	- Añadida prueba `test_adapter_eos_isolation_prevents_false_positives` en `LLM_Test/gemini/cache/test_radix_tree_cache.py` comprobando que Gemma no se confunde con tokens de Qwen y viceversa (7/7 tests superados).
+
+### 📝 Registro: [v0.9.45] - Pestaña Visualizadora de TreeNode en Historial de Conversaciones con Scroll Horizontal y Nodos Colapsados
+- **date-time**: 2026-10-26 13:35:00
+- **Problema**:
+	- En el popup web "Historial de Conversaciones y Memoria", los usuarios solo podían ver turnos planos en Markdown sin poder inspeccionar la jerarquía ramificada de memoria ni los nodos `TreeNode`.
+	- Si un nodo contenía un texto o parámetro ultra largo, existía el riesgo de desbordamiento horizontal deformando el modal o la pantalla si no se aislaba en un contenedor de scroll horizontal estricto. Además, se requería ver todos los parámetros de cada nodo y que por defecto todos aparecieran colapsados.
+- **Causa**:
+	- El componente `HistoryModal.jsx` y los endpoints de `routes/logs.py` carecían de una pestaña dedicada y de un extractor recursivo de la estructura jerárquica de árbol (`tree.json` o síntesis de turnos).
+- **Solución**:
+	- En `interface/backend/services/conversation_logger.py`: se implementó la función `get_tree_structure(session_dir)` para recuperar el árbol jerárquico desde `tree.json` persistido por la sesión, o sintetizarlo automáticamente agrupando turnos de usuario con sus parámetros temporales y de contexto.
+	- En `interface/backend/routes/logs.py`: se añadió el endpoint `GET /api/logs/conversations/{session_dir}/tree` que devuelve la estructura jerárquica de nodos.
+	- En `interface/frontend/src/components/HistoryModal.jsx`:
+		1. Se incorporó un conmutador de pestañas ("Turnos y Auditoría" y "Árbol TreeNode").
+		2. Se diseñó el componente recursivo `TreeNodeItem` con contenedor `overflow-x-auto whitespace-nowrap min-w-0 max-w-full` para que los textos o datos ultra largos tengan desplazamiento horizontal autónomo sin alterar el ancho del modal.
+		3. Se muestran todos los parámetros de cada nodo: nombre, nivel de profundidad, contador de hijos, `updated_at`, `data` y cualquier propiedad o metadata adicional.
+		4. Todos los nodos se inician colapsados por defecto (`expandedNodes: {}`), acompañados de botones utilitarios para "Colapsar Todo" y "Expandir Todo".
+
+### 📝 Registro: [v0.9.46] - Corrección de Cierre de Fragmento JSX en HistoryModal
+- **date-time**: 2026-10-26 13:42:00
+- **Problema**:
+	- Al ejecutar `pnpm build` en `interface/frontend`, Vite/esbuild fallaba con el error `Unexpected closing "main" tag does not match opening fragment tag` y `Unterminated regular expression` en `HistoryModal.jsx:610`.
+- **Causa**:
+	- Al introducir el selector de pestañas entre "Turnos" y "TreeNode", se abrió un fragmento JSX `<>` para envolver la cabecera y el cuerpo condicional del panel derecho, pero faltaba el cierre `</>` y la clausura del ternario externo antes de `</main>`, desalineando la jerarquía de etiquetas JSX.
+- **Solución**:
+	- En `interface/frontend/src/components/HistoryModal.jsx`: se añadió la etiqueta de cierre `</>` del fragmento y se restauró el `</div>` del contenedor del acordeón del turno, cerrando correctamente los ternarios antes de `</main>`.
+	- Verificada la compilación con éxito mediante `cmd /c pnpm --prefix interface/frontend build` (1530 módulos transformados, 0 errores, tiempo: 6.41s).
+
+### 📝 Registro: [v0.9.47] - Visualización del Estado Global de la Memoria Actual en Vivo (KV Cache Radix Tree y RAG)
+- **date-time**: 2026-10-26 13:58:00
+- **Problema**:
+	- En el popup "Historial de Conversaciones y Memoria", la pestaña "Árbol TreeNode" mostraba "No hay estructura TreeNode registrada en esta sesión" porque solo consultaba los logs de la sesión seleccionada en el sidebar, impidiendo al usuario ver el estado global actual y en tiempo real de la memoria RAM y del Radix Tree.
+- **Causa**:
+	- No existía un canal directo para consultar la jerarquía de memoria en vivo desde el proxy LLM (`CacheTreeNode` en RAM) ni un conmutador en la interfaz para alternar entre la memoria global actual y la sesión histórica elegida.
+- **Solución**:
+	- En `backend/prompt_cache.py`: se implementó el método `to_dict()` recursivo en `CacheTreeNode` (exportando nombre, tokens, resumen de EMA/hits, flags `is_system`, marcas de tiempo y ramas hijas) y el método `get_tree_structure()` en `PromptCacheManager`.
+	- En `backend/routes.py`: se expuso el endpoint `GET /system/cache/tree` y `GET /api/system/cache/tree` para servir la jerarquía completa del Radix Tree en vivo.
+	- En `backend/engine.py`: se integró la estructura de árbol en `get_memory_stats()`.
+	- En `interface/backend/routes/logs.py`: se añadió el endpoint `GET /api/logs/memory/current` (y alias `/api/logs/memory/tree/current`), el cual consolida en un único árbol raíz en tiempo real tanto el Radix KV Cache de la RAM del proxy como la memoria contextual RAG activa de Redis.
+	- En `interface/frontend/src/components/HistoryModal.jsx`:
+		1. Se añadió un botón fijo y prioritario en la parte superior del listado lateral: `"🌐 Memoria Global Actual (En Vivo / RAM)"` con indicador de pulso en vivo.
+		2. En la pestaña "Árbol TreeNode", se incorporó un selector de origen para conmutar al instante entre `"Global (En Vivo)"` y `"Sesión Seleccionada"`.
+		3. Se protegió el estado vacío para que, si una sesión histórica carece de árbol guardado, ofrezca un botón directo para saltar a la memoria global actual.
+	- Validada la serialización con una nueva prueba unitaria `test_tree_structure_serialization` en `LLM_Test/gemini/cache/test_radix_tree_cache.py` (8/8 tests OK en 0.031s) y compilación exitosa del frontend (`pnpm build` en 5.03s).
+
+### 📝 Registro: [v0.9.48] - Habilitación de Scroll Horizontal con Rueda de Ratón y Scrollbar Visible en TreeNode
+- **date-time**: 2026-10-26 14:07:00
+- **Problema**:
+	- Al visualizar el árbol TreeNode, los parámetros y textos ultra largos no respondían al desplazamiento horizontal con la rueda del ratón (problema clásico de `overflow-x: auto` en navegadores de escritorio en Windows) y la barra de desplazamiento resultaba invisible o colapsada. Además, al interactuar con el texto o hacer clic para arrastrar, se disparaba involuntariamente el colapso del nodo.
+- **Causa**:
+	- Los eventos `onWheel` verticales (`deltaY`) no son convertidos nativamente a `scrollLeft` por los navegadores en elementos `overflow-x` sin tecla Shift pulsada, y el evento `onClick` estaba asignado al contenedor global de toda la fila.
+- **Solución**:
+	- En `interface/frontend/src/index.css`: se añadió la clase utilitaria `.horizontal-scroll-container` con scrollbar de 8px de alto de contraste nítido (`#0284c7` / `#38bdf8`) para motores Webkit y Firefox.
+	- En `interface/frontend/src/components/HistoryModal.jsx`:
+		1. En `TreeNodeItem`, se desacopló el clic de colapsar/expandir dejándolo exclusivamente en el bloque de cabecera/chevron, protegiendo el área de parámetros contra cierres accidentales.
+		2. Se implementó el manejador `handleWheel` en el contenedor de parámetros que traduce el movimiento de la rueda del ratón (`deltaY`) directamente a `scrollLeft`, permitiendo scroll horizontal suave e instantáneo simplemente rodando el ratón sobre la fila.
+		3. Se aplicó `.horizontal-scroll-container` tanto a cada fila de parámetros como al contenedor general de la tarjeta del árbol (`overflow-x-auto p-3.5`).
+	- Verificada la compilación exitosa del frontend (`pnpm build` en 3.30s).
+
+### 📝 Registro: [v0.9.49] - Unificación del Scroll Horizontal Exclusivo en la Caja Contenedora del Árbol TreeNode
+- **date-time**: 2026-10-26 15:14:00
+- **Problema**:
+	- Se generaban dos scrollbars horizontales simultáneos: uno general en toda la tarjeta del árbol y otro diminuto de apenas ~10px dentro del contenedor de parámetros de cada fila individual, que en dispositivos móviles resultaba ilegible y difícil de manipular.
+- **Causa**:
+	- Cada fila `TreeNodeItem` mantenía un contenedor interno con `overflow-x-auto` además del scroll global de la tarjeta exterior.
+- **Solución**:
+	- En `interface/frontend/src/components/HistoryModal.jsx`:
+		1. Se eliminó el scroll horizontal interno de cada fila (`TreeNodeItem`), permitiendo que los parámetros y badges se desplieguen naturalmente en una sola línea continua con `whitespace-nowrap` y `w-fit min-w-full`.
+		2. Se mantuvo exclusivamente el scroll horizontal general de toda la caja contenedora del árbol (`overflow-x-auto horizontal-scroll-container` con `min-w-max`), permitiendo que el usuario se desplace horizontalmente a lo largo de toda la estructura de forma uniforme y cómoda tanto en móvil como en escritorio.
+	- Frontend compilado con éxito (`pnpm build` en 6.61s).
+
+### 📝 Registro: [v0.9.50] - Documentacion y ajustes del sistema RPi5 (Wi-Fi, Logs y SSH)
 - **date-time**: 2026-11-07 10:07:00
 - **Problema**:
 	- La Raspberry Pi 5 se desconectaba sola tras ~6 horas de actividad sin responder por SSH ni ping, manteniendo la luz de disco parpadeando y la luz verde encendida. Además, el usuario no podía acceder por SSH por discrepancia de usuario en Windows.
@@ -1417,7 +1525,7 @@
 	- Se configuró `~/.ssh/config` en Windows para mapear `192.168.1.200` y `ras` al usuario `inibir`.
 	- Se documentaron todos los cambios en `Docs/rpi5_configuracion.md`, `README.md` y se sincronizaron con el repositorio en la RPi5.
 
-### 📝 Registro: [v0.9.43] - Correccion de bloqueo NVMe Netac APST, PCIe Gen 2 y Journald persistente
+### 📝 Registro: [v0.9.51] - Correccion de bloqueo NVMe Netac APST, PCIe Gen 2 y Journald persistente
 - **date-time**: 2026-11-08 01:32:00
 - **Problema**:
 	- La RPi5 volvió a desconectarse tras ~4h45m (de 09:50 a 14:35) con la luz verde encendida, disco parpadeando y sin respuesta de red ni SSH. Además, los logs de journald continuaban en memoria volátil sin persistir.
@@ -1430,7 +1538,7 @@
 	- Se añadió `/etc/cron.d/wifi-keepalive` para evitar desasociación por inactividad en el router.
 	- Se actualizó [Docs/rpi5_configuracion.md](file:///c:/work/person/hassan/Repos/ollama-proxy/Docs/rpi5_configuracion.md) y se sincronizó con la RPi5.
 
-### 📝 Registro: [v0.9.44] - Diagnostico journald de desconexion Wi-Fi nocturna y despliegue de Watchdog
+### 📝 Registro: [v0.9.52] - Diagnostico journald de desconexion Wi-Fi nocturna y despliegue de Watchdog
 - **date-time**: 2026-11-08 13:27:00
 - **Problema**:
 	- La RPi5 volvió a quedar inaccesible a lo largo de la mañana tras haber estado funcionando durante ~12 horas continuadas (desde las 00:25 GMT).
@@ -1441,3 +1549,15 @@
 	- Se eliminó la restricción forzada a 5GHz (`802-11-wireless.band ""` permitiendo fallback a 2.4GHz en Canal 10 con señal del 75%).
 	- Se instaló un script watchdog `/usr/local/bin/wifi-watchdog.sh` ejecutado por cron cada 2 minutos que reintenta la conexión o cicla la radio Wi-Fi en caso de pérdida de enlace con el gateway.
 	- Se documentó el análisis forense en `Docs/rpi5_configuracion.md` y se sincronizó con la RPi5.
+
+
+### 📝 Registro: [v0.9.53] - Reactivacion de PCIe Gen 3 en RPi5 con APST deshabilitado y logs persistentes
+- **date-time**: 2026-11-08 13:40:00
+- **Problema**:
+	- Se solicitó reactivar la velocidad PCIe Gen 3 en el SSD NVMe manteniendo la persistencia de logs en disco para monitorizar cualquier posible anomalía.
+- **Causa**:
+	- Se confirmó en los registros persistentes previos que el SSD no presentó errores de bus ni desconexiones durante 12 horas. Con APST desactivado en el kernel (`nvme_core.default_ps_max_latency_us=0`), el disco opera sin caer en estados de suspensión defectuosos.
+- **Solución**:
+	- Se actualizó `/boot/firmware/config.txt` estableciendo `dtparam=pciex1_gen=3`.
+	- Se verificó que la persistencia en disco NVMe de `systemd-journald` sigue plenamente operativa en `/var/log/journal/`.
+	- Se actualizó [Docs/rpi5_configuracion.md](file:///c:/work/person/hassan/Repos/ollama-proxy/Docs/rpi5_configuracion.md) y se sincronizó con la RPi5.

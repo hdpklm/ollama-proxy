@@ -434,4 +434,79 @@ class ConversationLogger:
 		with open(fpath, "r", encoding="utf-8") as f:
 			return f.read()
 
+	def get_tree_structure(self, session_dir: str) -> dict:
+		clean_dir = os.path.basename(session_dir)
+		folder_path = os.path.join(self.base_dir, clean_dir)
+		if not os.path.isdir(folder_path):
+			return {"name": "root", "data": None, "updated_at": time.time(), "children": {}}
+
+		tree_json_path = os.path.join(folder_path, "tree.json")
+		if os.path.isfile(tree_json_path):
+			try:
+				with open(tree_json_path, "r", encoding="utf-8") as f:
+					return json.load(f)
+			except Exception:
+				pass
+
+		user_turn_files = sorted([f for f in os.listdir(folder_path) if f.endswith("-user.md") or "-user" in f])
+		root_node = {
+			"name": clean_dir,
+			"data": f"Sesión: {clean_dir}",
+			"updated_at": time.time(),
+			"children": {}
+		}
+
+		if user_turn_files:
+			latest_file = os.path.join(folder_path, user_turn_files[-1])
+			try:
+				with open(latest_file, "r", encoding="utf-8") as f:
+					content = f.read()
+				rag_m = re.search(r"### B\. Memoria RAG Jerárquica en Árbol \(TreeNode\)\s*```(?:markdown)?\s*(.*?)\s*```", content, re.DOTALL)
+				if rag_m:
+					rag_text = rag_m.group(1).strip()
+					curr_topic = None
+					curr_subtopic = None
+					for line in rag_text.splitlines():
+						line_str = line.rstrip()
+						if not line_str or line_str.startswith("[datos"):
+							continue
+						if line_str.startswith("- ") and ":" in line_str:
+							topic = line_str[2:].split(":")[0].strip()
+							curr_topic = topic
+							if topic not in root_node["children"]:
+								root_node["children"][topic] = {
+									"name": topic,
+									"data": "Tema Principal",
+									"updated_at": time.time(),
+									"children": {}
+								}
+						elif line_str.startswith("  - ") and curr_topic:
+							sub = line_str[4:].split(":")[0].strip()
+							curr_subtopic = sub
+							if sub not in root_node["children"][curr_topic]["children"]:
+								root_node["children"][curr_topic]["children"][sub] = {
+									"name": sub,
+									"data": "Sub-tema",
+									"updated_at": time.time(),
+									"children": {}
+								}
+						elif "-- " in line_str and curr_topic and curr_subtopic:
+							det_part = line_str.split("-- ", 1)[1].strip()
+							data_val = None
+							det_name = det_part
+							if "(" in det_part and det_part.endswith(")"):
+								det_name, data_val = det_part.rsplit("(", 1)
+								det_name = det_name.strip()
+								data_val = data_val[:-1].strip()
+							root_node["children"][curr_topic]["children"][curr_subtopic]["children"][det_name] = {
+								"name": det_name,
+								"data": data_val or "Detalle",
+								"updated_at": time.time(),
+								"children": {}
+							}
+			except Exception:
+				pass
+
+		return root_node
+
 conversation_logger = ConversationLogger()

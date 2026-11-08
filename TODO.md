@@ -317,3 +317,17 @@ Lista de características, optimizaciones y tareas pendientes ordenadas por prio
 - [ ] **Acción manual de archivo**:
 	- Botón en la interfaz web para consolidar o archivar la rama activa directamente en el árbol `TreeNode` de RAG cuando el usuario lo decida.
 
+---
+
+### 33. Optimización de Timestamps y Preservación del KV Cache (Eliminación del Silent Cache Killer)
+- [ ] **Desacoplamiento de Marcas de Tiempo en Prompts y Mensajes**:
+	- **Problema**: La función `stamp(text)` antepone la fecha y hora con precisión de minutos (`[Fecha y hora actual: ... HH:MM ...]`) al inicio de cada mensaje de usuario. Esto altera los primeros ~25 tokens de cada petición cada 60 segundos, destruyendo el prefijo común del Radix Tree y forzando la reevaluación completa en RAM/GPU.
+	- **Propuesta de Tool para Metadatos Temporales por Índice (Zero-Cache-Break)**:
+		- Implementar una herramienta nativa (ej. `get_message_timestamp(message_index: int)` o `get_turn_datetime(index: int)`).
+		- El LLM puede consultar la fecha y hora exacta de cualquier mensaje indicando su índice cuando sea necesario para resolver referencias relativas (*"ayer"*, *"hace 2 horas"*), sin romper el caché de tokens previo.
+		- Los textos de los mensajes de usuario y turnos en el historial se mantienen limpios y estables, garantizando la reutilización total del prefijo en el árbol Radix.
+	- **Alternativas complementarias a evaluar**:
+		- Granularidad exclusivamente diaria (`[Fecha: YYYY-MM-DD]`) compartida durante 24 horas y ubicada al final del mensaje.
+		- Inyección temporal efímera exclusiva del turno activo sin persistencia en el árbol KV.
+
+
