@@ -1404,3 +1404,15 @@
 		2. Reemplazado el encabezado por una barra compacta HUD superior que resume en una línea: Modelo, estado RAM (mmap), nivel de prioridad del planificador, pausas detectadas y duración total del turno.
 		3. Creada una rejilla compacta de 3 columnas (Prompt/Input, Generación/Output, KV Cache & RAM) mostrando tokens, velocidades (t/s) y duraciones de forma alineada y legible.
 		4. Si no se usan herramientas externas, se sustituye la caja gris vacía por una línea discreta y minimalista ("Inferencia pura / sin herramientas").
+
+### 📝 Registro: [v0.9.42] - Documentacion y ajustes del sistema RPi5 (Wi-Fi, Logs y SSH)
+- **date-time**: 2026-11-07 10:07:00
+- **Problema**:
+	- La Raspberry Pi 5 se desconectaba sola tras ~6 horas de actividad sin responder por SSH ni ping, manteniendo la luz de disco parpadeando y la luz verde encendida. Además, el usuario no podía acceder por SSH por discrepancia de usuario en Windows.
+- **Causa**:
+	- Ahorro de energía Wi-Fi (`Power Management: on`) en el chip BCM43455/6 que suspendía la interfaz tras inactividad al usar IP fija (sin renovación DHCP). El disco parpadeaba por presión de memoria (~5.4 GB ocupados de 7.9 GB por contenedores) volcando a swap (`zram-writeback`). El cliente Windows enviaba por defecto el usuario local `snipe` en lugar de `inibir`.
+- **Solución**:
+	- Se desactivó de forma persistente el ahorro de energía Wi-Fi en NetworkManager (`wifi.powersave = 2`).
+	- Se habilitó almacenamiento persistente en disco NVMe para `systemd-journald` (`/var/log/journal`).
+	- Se configuró `~/.ssh/config` en Windows para mapear `192.168.1.200` y `ras` al usuario `inibir`.
+	- Se documentaron todos los cambios en `Docs/rpi5_configuracion.md`, `README.md` y se sincronizaron con el repositorio en la RPi5.

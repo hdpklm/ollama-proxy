@@ -296,6 +296,27 @@ Si por algún motivo la Raspberry Pi no arranca tras cambiar la frecuencia, recu
 
 ---
 
+### 4. Configuración del Sistema, Red Wi-Fi y Logs Persistentes
+
+Para evitar desconexiones de red tras periodos de inactividad y garantizar diagnóstico tras reinicios imprevistos:
+
+1. **Desactivar Ahorro de Energía Wi-Fi** (evita caídas a las ~6 horas por suspensión de `wlan0` con IP fija):
+   ```bash
+   sudo nmcli connection modify inibir-2 802-11-wireless.powersave 2
+   printf '[connection]\nwifi.powersave = 2\n' | sudo tee /etc/NetworkManager/conf.d/default-wifi-powersave-disable.conf
+   ```
+
+2. **Habilitar Logs Persistentes en Disco NVMe** (permite leer con `journalctl -b -1 -e` las causas de cuelgues anteriores):
+   ```bash
+   sudo mkdir -p /var/log/journal
+   sudo systemd-tmpfiles --create --prefix /var/log/journal
+   sudo systemctl restart systemd-journald
+   ```
+
+> Consulta la guía detallada de ajustes en [Docs/rpi5_configuracion.md](file:///c:/work/person/hassan/Repos/ollama-proxy/Docs/rpi5_configuracion.md).
+
+---
+
 ## Scripts de Prueba Concurrente
 
 Dentro de la carpeta `test_win/` dispones de scripts para comprobar la interrupción preventiva y medir tokens por segundo:
