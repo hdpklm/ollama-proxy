@@ -1416,3 +1416,16 @@
 	- Se habilitó almacenamiento persistente en disco NVMe para `systemd-journald` (`/var/log/journal`).
 	- Se configuró `~/.ssh/config` en Windows para mapear `192.168.1.200` y `ras` al usuario `inibir`.
 	- Se documentaron todos los cambios en `Docs/rpi5_configuracion.md`, `README.md` y se sincronizaron con el repositorio en la RPi5.
+
+### 📝 Registro: [v0.9.43] - Correccion de bloqueo NVMe Netac APST, PCIe Gen 2 y Journald persistente
+- **date-time**: 2026-11-08 01:32:00
+- **Problema**:
+	- La RPi5 volvió a desconectarse tras ~4h45m (de 09:50 a 14:35) con la luz verde encendida, disco parpadeando y sin respuesta de red ni SSH. Además, los logs de journald continuaban en memoria volátil sin persistir.
+- **Causa**:
+	- El disco instalado (Netac NVMe SSD 250GB) entra en suspensión no-operacional profunda (APST ps 3 y ps 4 con latencias de 10-45ms) tras horas de reposo; el controlador Netac falla al despertar dentro del timeout de PCIe. Esto, sumado al overclock PCIe Gen 3 (8 GT/s) que generaba interferencias EMI y errores CRC, provocaba que el bus PCIe cayera en bucle de reset permanente (parpadeo de disco y cuelgue total). Adicionalmente, `/usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf` de Raspberry Pi OS estaba anulando la persistencia de logs.
+- **Solución**:
+	- Se desactivó APST en `/boot/firmware/cmdline.txt` mediante `nvme_core.default_ps_max_latency_us=0`.
+	- Se configuró PCIe en Gen 2 estable (5 GT/s) en `/boot/firmware/config.txt` (`dtparam=pciex1_gen=2`).
+	- Se enmascaró `40-rpi-volatile-storage.conf` hacia `/dev/null` y se fijó `Storage=persistent` en `99-persistent.conf`, almacenando `system.journal` en NVMe.
+	- Se añadió `/etc/cron.d/wifi-keepalive` para evitar desasociación por inactividad en el router.
+	- Se actualizó [Docs/rpi5_configuracion.md](file:///c:/work/person/hassan/Repos/ollama-proxy/Docs/rpi5_configuracion.md) y se sincronizó con la RPi5.
