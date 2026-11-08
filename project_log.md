@@ -1429,3 +1429,15 @@
 	- Se enmascaró `40-rpi-volatile-storage.conf` hacia `/dev/null` y se fijó `Storage=persistent` en `99-persistent.conf`, almacenando `system.journal` en NVMe.
 	- Se añadió `/etc/cron.d/wifi-keepalive` para evitar desasociación por inactividad en el router.
 	- Se actualizó [Docs/rpi5_configuracion.md](file:///c:/work/person/hassan/Repos/ollama-proxy/Docs/rpi5_configuracion.md) y se sincronizó con la RPi5.
+
+### 📝 Registro: [v0.9.44] - Diagnostico journald de desconexion Wi-Fi nocturna y despliegue de Watchdog
+- **date-time**: 2026-11-08 13:27:00
+- **Problema**:
+	- La RPi5 volvió a quedar inaccesible a lo largo de la mañana tras haber estado funcionando durante ~12 horas continuadas (desde las 00:25 GMT).
+- **Causa**:
+	- El registro persistente de `journalctl -b -1` confirmó que a las 04:06 GMT el router resincronizó la radio 5GHz emitiendo `ASSOC-REJECT status_code=16`. La conexión estaba restringida exclusivamente a la banda de 5GHz (`band: a`) y con el límite por defecto de 4 reintentos (`autoconnect-retries=-1`). Tras fallar 4 veces, NetworkManager abandonó definitivamente la conexión a las 04:35 GMT dejando la interfaz sin IP. El sistema Linux se mantuvo activo sin fallos de kernel ni NVMe hasta las 12:20 GMT, cuando el usuario pulsó el botón físico de encendido (`Power key pressed short`).
+- **Solución**:
+	- Se configuraron reintentos infinitos (`connection.autoconnect-retries 0`).
+	- Se eliminó la restricción forzada a 5GHz (`802-11-wireless.band ""` permitiendo fallback a 2.4GHz en Canal 10 con señal del 75%).
+	- Se instaló un script watchdog `/usr/local/bin/wifi-watchdog.sh` ejecutado por cron cada 2 minutos que reintenta la conexión o cicla la radio Wi-Fi en caso de pérdida de enlace con el gateway.
+	- Se documentó el análisis forense en `Docs/rpi5_configuracion.md` y se sincronizó con la RPi5.
